@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { PRODUCTS } from "@/lib/products";
 
 export default function ProductClient({ sku }: { sku: string }) {
@@ -11,21 +11,9 @@ export default function ProductClient({ sku }: { sku: string }) {
   const [status, setStatus] = useState<string>("");
   const [sending, setSending] = useState(false);
 
-  const storageKey = `pickup_submitted_${upper}`;
+  // ✅ 이번 접속(세션)에서만 신청완료 처리
   const [submitted, setSubmitted] = useState(false);
   const [lastCoord, setLastCoord] = useState<{ lat: number; lng: number; acc?: number } | null>(null);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        setSubmitted(true);
-        if (parsed?.lat && parsed?.lng) setLastCoord(parsed);
-        setStatus("이미 회수요청이 완료된 제품입니다.");
-      }
-    } catch {}
-  }, [storageKey]);
 
   if (!product) {
     return (
@@ -37,15 +25,16 @@ export default function ProductClient({ sku }: { sku: string }) {
   }
 
   const requestPickup = async () => {
-    if (submitted) return;
+    // ✅ 같은 화면에서 연타 방지
+    if (sending || submitted) return;
 
     if (!navigator.geolocation) {
       setStatus("이 기기에서 위치 기능을 지원하지 않아요.");
       return;
     }
 
-    const TARGET_ACCURACY_M = 30; // 필요하면 50으로 완화 가능
-    const MAX_WAIT_MS = 15000;
+    const TARGET_ACCURACY_M = 50; // 필요하면 50으로 완화 가능
+    const MAX_WAIT_MS = 5000;
 
     setSending(true);
     setStatus("정확한 GPS 잡는 중... 잠시만요.");
@@ -79,6 +68,7 @@ export default function ProductClient({ sku }: { sku: string }) {
         return false;
       }
 
+      // ✅ 성공 처리: 신청완료 표시 + 버튼 비활성 (이 접속에서만)
       setStatus(`회수 요청 완료! (정확도 약 ${Math.round(pos.coords.accuracy)}m)`);
       setSubmitted(true);
 
@@ -88,10 +78,6 @@ export default function ProductClient({ sku }: { sku: string }) {
         acc: pos.coords.accuracy ?? undefined,
       };
       setLastCoord(coord);
-
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(coord));
-      } catch {}
 
       return true;
     };
@@ -180,7 +166,7 @@ export default function ProductClient({ sku }: { sku: string }) {
 
       {status && <div style={{ marginTop: 12, fontSize: 14, opacity: 0.9 }}>{status}</div>}
 
-      {/* 지도는 미리보기(키 필요 없는 OSM) + 클릭은 구글지도 */}
+      {/* ✅ 지도는 미리보기(OSM) + 클릭은 구글지도 */}
       {lastCoord && (
         <div style={{ marginTop: 14 }}>
           <div style={{ fontSize: 14, marginBottom: 8, opacity: 0.9 }}>
