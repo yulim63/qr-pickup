@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PRODUCTS } from "@/lib/products";
 
 export default function ProductClient({ sku }: { sku: string }) {
@@ -10,6 +10,23 @@ export default function ProductClient({ sku }: { sku: string }) {
 
   const [status, setStatus] = useState<string>("");
   const [sending, setSending] = useState(false);
+
+  // ✅ 신청완료(재클릭 방지) + 마지막 좌표 저장
+  const storageKey = `pickup_submitted_${upper}`;
+  const [submitted, setSubmitted] = useState(false);
+  const [lastCoord, setLastCoord] = useState<{ lat: number; lng: number; acc?: number } | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setSubmitted(true);
+        if (parsed?.lat && parsed?.lng) setLastCoord(parsed);
+        setStatus("이미 회수요청이 완료된 제품입니다.");
+      }
+    } catch {}
+  }, [storageKey]);
 
   if (!product) {
     return (
@@ -21,54 +38,112 @@ export default function ProductClient({ sku }: { sku: string }) {
   }
 
   const requestPickup = async () => {
+    if (submitted) return;
+
     if (!navigator.geolocation) {
       setStatus("이 기기에서 위치 기능을 지원하지 않아요.");
       return;
     }
 
+    // ✅ 정확도 개선: 일정 정확도 도달 시 전송
+    const TARGET_ACCURACY_M = 50;     const MAX_WAIT_MS = 15000;
+
     setSending(true);
-    setStatus("위치 확인 중...");
+    setStatus("정확한 GPS 잡는 중... 잠시만요.");
 
-    navigator.geolocation.getCurrentPosition(
+    let done = false;
+    let timer: any = null;
+    let watchId: number | null = null;
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      if (watchId != null) navigator.geolocation.clearWatch(watchId);
+    };
+
+    const send = async (pos: GeolocationPosition) => {
+      const body = {
+        sku: product.sku,
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy ?? null,
+      };
+
+      const res = await fetch("/api/pickup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const t = await res.text();
+        setStatus(`전송 실패: ${t}`);
+        return false;
+      }
+
+      // ✅ 성공 처리: 신청완료 + 버튼 비활성 + 좌표 저장(새로고침 유지)
+      setStatus(`회수 요청 완료! (정확도 약 ${Math.round(pos.coords.accuracy)}m)`);
+      setSubmitted(true);
+
+      const coord = {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        acc: pos.coords.accuracy ?? undefined,
+      };
+      setLastCoord(coord);
+
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(coord));
+      } catch {}
+
+      return true;
+    };
+
+    let lastPos: GeolocationPosition | null = null;
+
+    timer = setTimeout(async () => {
+      if (done) return;
+      done = true;
+      cleanup();
+
+      if (lastPos) {
+        setStatus("시간이 지나서 현재 측정값으로 전송합니다...");
+        await send(lastPos);
+      } else {
+        setStatus("위치 측정 실패(시간 초과). 잠시 후 다시 시도해 주세요.");
+      }
+      setSending(false);
+    }, MAX_WAIT_MS);
+
+    watchId = navigator.geolocation.watchPosition(
       async (pos) => {
-        try {
-          setStatus("회수 요청 전송 중...");
+        lastPos = pos;
+        const acc = pos.coords.accuracy ?? 9999;
 
-          const body = {
-            sku: product.sku,
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            accuracy: pos.coords.accuracy ?? null,
-          };
+        setStatus(`위치 측정 중... (정확도 약 ${Math.round(acc)}m)`);
 
-          const res = await fetch("/api/pickup", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-
-          if (!res.ok) {
-            const t = await res.text();
-            setStatus(`전송 실패: ${t}`);
-            return;
-          }
-
-          setStatus("회수 요청 완료! 담당자가 위치를 확인합니다.");
-        } catch (e: any) {
-          setStatus(`오류: ${e?.message || "알 수 없음"}`);
-        } finally {
+        if (!done && acc <= TARGET_ACCURACY_M) {
+          done = true;
+          cleanup();
+          setStatus("정확도 기준 충족! 전송 중...");
+          await send(pos);
           setSending(false);
         }
       },
       (err) => {
+        cleanup();
         setSending(false);
+
         if (err.code === err.PERMISSION_DENIED) {
           setStatus("위치 권한이 거부되었습니다. 브라우저 설정에서 위치 권한을 허용해 주세요.");
         } else {
           setStatus(`위치 확인 실패: ${err.message}`);
         }
       },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+      {
+        enableHighAccuracy: true,
+        timeout: 12000,
+        maximumAge: 0,
+      }
     );
   };
 
@@ -90,7 +165,7 @@ export default function ProductClient({ sku }: { sku: string }) {
 
       <button
         onClick={requestPickup}
-        disabled={sending}
+        disabled={sending || submitted}
         style={{
           width: "100%",
           padding: "14px 16px",
@@ -98,13 +173,46 @@ export default function ProductClient({ sku }: { sku: string }) {
           border: "none",
           fontSize: 16,
           fontWeight: 700,
-          cursor: sending ? "not-allowed" : "pointer",
+          cursor: sending || submitted ? "not-allowed" : "pointer",
+          opacity: submitted ? 0.7 : 1,
         }}
       >
-        {sending ? "전송 중..." : "회수요청"}
+        {submitted ? "신청완료" : sending ? "전송 중..." : "회수요청"}
       </button>
 
       {status && <div style={{ marginTop: 12, fontSize: 14, opacity: 0.9 }}>{status}</div>}
+
+      {/* ✅ 모바일에서도 지도 보이기 */}
+      {lastCoord && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 14, marginBottom: 8, opacity: 0.9 }}>
+            내 위치 확인 (정확도 약 {lastCoord.acc ? Math.round(lastCoord.acc) : "-"}m)
+          </div>
+
+          <a
+            href={`https://map.naver.com/v5/?c=${lastCoord.lng},${lastCoord.lat},16,0,0,0,dh`}
+            target="_blank"
+            rel="noreferrer"
+            style={{ display: "inline-block", marginBottom: 10 }}
+          >
+            네이버지도에서 열기
+          </a>
+
+          <div style={{ border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>
+            <iframe
+              title="map"
+              width="100%"
+              height="280"
+              style={{ border: 0, display: "block" }}
+              src={`https://www.openstreetmap.org/export/embed.html?bbox=${lastCoord.lng - 0.002},${
+                lastCoord.lat - 0.002
+              },${lastCoord.lng + 0.002},${lastCoord.lat + 0.002}&layer=mapnik&marker=${lastCoord.lat},${
+                lastCoord.lng
+              }`}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
