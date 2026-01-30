@@ -33,8 +33,8 @@ export default function ProductClient({ sku }: { sku: string }) {
       return;
     }
 
-    const TARGET_ACCURACY_M = 30; // 필요하면 50으로 완화 가능
-    const MAX_WAIT_MS = 10000;
+    const TARGET_ACCURACY_M = 10; // 필요하면 50으로 완화 가능
+    const MAX_WAIT_MS = 5000;
 
     setSending(true);
     setStatus("정확한 GPS 잡는 중... 잠시만요.");
@@ -125,7 +125,7 @@ export default function ProductClient({ sku }: { sku: string }) {
       },
       {
         enableHighAccuracy: true,
-        timeout: 12000,
+        timeout: 10000,
         maximumAge: 0,
       }
     );
