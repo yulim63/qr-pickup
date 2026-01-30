@@ -11,7 +11,6 @@ export default function ProductClient({ sku }: { sku: string }) {
   const [status, setStatus] = useState<string>("");
   const [sending, setSending] = useState(false);
 
-  // ✅ 신청완료(재클릭 방지) + 마지막 좌표 저장
   const storageKey = `pickup_submitted_${upper}`;
   const [submitted, setSubmitted] = useState(false);
   const [lastCoord, setLastCoord] = useState<{ lat: number; lng: number; acc?: number } | null>(null);
@@ -45,8 +44,8 @@ export default function ProductClient({ sku }: { sku: string }) {
       return;
     }
 
-    // ✅ 정확도 개선: 일정 정확도 도달 시 전송
-    const TARGET_ACCURACY_M = 50;     const MAX_WAIT_MS = 15000;
+    const TARGET_ACCURACY_M = 30; // 필요하면 50으로 완화 가능
+    const MAX_WAIT_MS = 15000;
 
     setSending(true);
     setStatus("정확한 GPS 잡는 중... 잠시만요.");
@@ -80,7 +79,6 @@ export default function ProductClient({ sku }: { sku: string }) {
         return false;
       }
 
-      // ✅ 성공 처리: 신청완료 + 버튼 비활성 + 좌표 저장(새로고침 유지)
       setStatus(`회수 요청 완료! (정확도 약 ${Math.round(pos.coords.accuracy)}m)`);
       setSubmitted(true);
 
@@ -182,7 +180,7 @@ export default function ProductClient({ sku }: { sku: string }) {
 
       {status && <div style={{ marginTop: 12, fontSize: 14, opacity: 0.9 }}>{status}</div>}
 
-      {/* ✅ 모바일에서도 지도 보이기 */}
+      {/* 지도는 미리보기(키 필요 없는 OSM) + 클릭은 구글지도 */}
       {lastCoord && (
         <div style={{ marginTop: 14 }}>
           <div style={{ fontSize: 14, marginBottom: 8, opacity: 0.9 }}>
@@ -190,12 +188,12 @@ export default function ProductClient({ sku }: { sku: string }) {
           </div>
 
           <a
-            href={`https://map.naver.com/v5/?c=${lastCoord.lng},${lastCoord.lat},16,0,0,0,dh`}
+            href={`https://www.google.com/maps?q=${lastCoord.lat},${lastCoord.lng}`}
             target="_blank"
             rel="noreferrer"
             style={{ display: "inline-block", marginBottom: 10 }}
           >
-            네이버지도에서 열기
+            구글지도에서 열기
           </a>
 
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>

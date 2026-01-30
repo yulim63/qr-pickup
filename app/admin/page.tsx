@@ -33,7 +33,7 @@ export default async function AdminPage() {
           </thead>
           <tbody>
             {(data || []).map((r) => {
-              const mapUrl = `https://map.naver.com/v5/?c=${Number(r.lng)},${Number(r.lat)},16,0,0,0,dh`;
+              const mapUrl = `https://www.google.com/maps?q=${Number(r.lat)},${Number(r.lng)}`;
 
               return (
                 <tr key={r.id}>
@@ -47,7 +47,7 @@ export default async function AdminPage() {
                   <td style={td}>{r.accuracy ?? "-"}</td>
                   <td style={td}>
                     <a href={mapUrl} target="_blank" rel="noreferrer">
-                      열기
+                      구글지도 열기
                     </a>
                   </td>
                 </tr>
