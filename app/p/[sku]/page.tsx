@@ -1,6 +1,10 @@
 import ProductClient from "./Client";
 
-export default async function ProductPage(props: { params: Promise<{ sku: string }> }) {
-  const { sku } = await props.params;
-  return <ProductClient sku={sku} />;
+type Props = {
+  params: { sku: string } | Promise<{ sku: string }>;
+};
+
+export default async function ProductPage({ params }: Props) {
+  const p = await params; // ✅ Next 16에서 params Promise 이슈 방지
+  return <ProductClient sku={p.sku} />;
 }
