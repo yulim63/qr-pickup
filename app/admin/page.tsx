@@ -8,7 +8,7 @@ export default async function AdminPage() {
 
   const { data, error } = await sb
     .from("pickup_requests")
-    .select("id, created_at, sku, lat, lng, accuracy")
+    .select("id, created_at, sku, item_no, lat, lng, accuracy")
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -43,7 +43,10 @@ export default async function AdminPage() {
                 {new Date(r.created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
               </div>
 
-              <div style={{ marginTop: 6, fontSize: 16, fontWeight: 800 }}>{r.sku}</div>
+              <div style={{ marginTop: 6, fontSize: 16, fontWeight: 900 }}>
+                {r.sku}
+                {r.item_no ? <span style={{ fontWeight: 800 }}> / {r.item_no}</span> : null}
+              </div>
 
               <div style={{ marginTop: 6, fontSize: 13 }}>
                 좌표: {lat.toFixed(6)}, {lng.toFixed(6)}
@@ -54,7 +57,7 @@ export default async function AdminPage() {
                 href={googleUrl}
                 target="_blank"
                 rel="noreferrer"
-                style={{ display: "inline-block", marginTop: 8, fontSize: 14, fontWeight: 700 }}
+                style={{ display: "inline-block", marginTop: 8, fontSize: 14, fontWeight: 800 }}
               >
                 구글지도 열기
               </a>
