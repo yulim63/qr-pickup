@@ -19,13 +19,13 @@ function parseSkuAndItem(raw: string) {
   const idx = up.indexOf("_");
   if (idx >= 0) {
     const sku = up.slice(0, idx);
-    const item_no = s.slice(idx + 1).trim(); // 원문 케이스 유지하고 싶으면 원문에서 추출
+    const item_no = s.slice(idx + 1).trim();
     return { sku, item_no: item_no || null };
   }
   return { sku: up, item_no: null };
 }
 
-// ✅ 사용자 화면: 적재 X(초록), 적재 O(빨강)
+// ✅ 적재 X(초록), 적재 O(빨강) (사용자 화면 기준)
 function loadStatusChip(s: LoadStatus) {
   if (s === "X") return { text: "적재 X", bg: "#ecfff1", fg: "#166534" };
   if (s === "O") return { text: "적재 O", bg: "#ffecec", fg: "#b00020" };
@@ -33,7 +33,6 @@ function loadStatusChip(s: LoadStatus) {
 }
 
 async function compressImage(file: File, maxSide = 1280, quality = 0.75): Promise<Blob> {
-  // jpg/png만
   const t = (file.type || "").toLowerCase();
   if (!(t.includes("jpeg") || t.includes("jpg") || t.includes("png"))) {
     throw new Error("JPG/PNG 형식만 업로드 가능합니다.");
@@ -51,7 +50,6 @@ async function compressImage(file: File, maxSide = 1280, quality = 0.75): Promis
 
     const w = img.naturalWidth || img.width;
     const h = img.naturalHeight || img.height;
-
     if (!w || !h) throw new Error("이미지 크기 확인 실패");
 
     const scale = Math.min(1, maxSide / Math.max(w, h));
@@ -67,7 +65,7 @@ async function compressImage(file: File, maxSide = 1280, quality = 0.75): Promis
 
     ctx.drawImage(img, 0, 0, nw, nh);
 
-    const outType = "image/jpeg"; // 통일(jpg)해서 용량 절감
+    const outType = "image/jpeg"; // jpg로 통일해서 용량 절감
     const blob: Blob = await new Promise((resolve, reject) => {
       canvas.toBlob(
         (b) => {
@@ -86,7 +84,7 @@ async function compressImage(file: File, maxSide = 1280, quality = 0.75): Promis
 }
 
 type Props = {
-  sku: string; // page.tsx에서 넘겨준 params.sku
+  sku: string;
 };
 
 export default function ProductClient({ sku: rawSku }: Props) {
@@ -121,7 +119,6 @@ export default function ProductClient({ sku: rawSku }: Props) {
   const [lat, setLat] = useState<number | null>(null);
   const [lng, setLng] = useState<number | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
-
   const [address, setAddress] = useState<string>("");
 
   const handlePickPhoto = async (file: File | null) => {
@@ -137,13 +134,14 @@ export default function ProductClient({ sku: rawSku }: Props) {
       return;
     }
 
-    // 미리보기 URL 갱신
     if (photoPreviewUrlRef.current) {
       URL.revokeObjectURL(photoPreviewUrlRef.current);
       photoPreviewUrlRef.current = "";
     }
+
     const url = URL.createObjectURL(file);
     photoPreviewUrlRef.current = url;
+
     setPhotoPreview(url);
     setPhotoFile(file);
   };
@@ -203,12 +201,11 @@ export default function ProductClient({ sku: rawSku }: Props) {
       setLng(loc.lng);
       setAccuracy(loc.accuracy);
 
-      // 사진이 있으면 압축해서 업로드(폼데이터)
       const form = new FormData();
       form.set("sku", sku);
       if (item_no) form.set("item_no", item_no);
 
-      form.set("qty", String(parsedQty)); // number 확정이라 String 변환만
+      form.set("qty", String(parsedQty)); // parsedQty는 number 확정
       form.set("load_status", loadStatus);
       form.set("note", (note || "").slice(0, 100));
 
@@ -218,8 +215,7 @@ export default function ProductClient({ sku: rawSku }: Props) {
 
       if (photoFile) {
         const compressed = await compressImage(photoFile, 1280, 0.75);
-        const ext = "jpg";
-        const fname = `pickup_${sku}_${item_no ? item_no + "_" : ""}${Date.now()}.${ext}`;
+        const fname = `pickup_${sku}_${item_no ? item_no + "_" : ""}${Date.now()}.jpg`;
         form.set("photo", compressed, fname);
       }
 
@@ -229,7 +225,6 @@ export default function ProductClient({ sku: rawSku }: Props) {
         throw new Error(t || "전송 실패");
       }
 
-      // 서버가 address 내려주면 표시
       const data = (await res.json()) as any;
       if (data?.row?.address) setAddress(String(data.row.address));
       else if (data?.address) setAddress(String(data.address));
@@ -309,7 +304,9 @@ export default function ProductClient({ sku: rawSku }: Props) {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div style={{ fontSize: 18, fontWeight: 1000 }}>
             {product.name}
-            {item_no ? <span style={{ fontSize: 13, fontWeight: 900, marginLeft: 8, opacity: 0.7 }}>({item_no})</span> : null}
+            {item_no ? (
+              <span style={{ fontSize: 13, fontWeight: 900, marginLeft: 8, opacity: 0.7 }}>({item_no})</span>
+            ) : null}
           </div>
 
           <span className="chip" style={{ background: st.bg, color: st.fg }} title="적재 상태">
@@ -342,13 +339,9 @@ export default function ProductClient({ sku: rawSku }: Props) {
           value={qtyText}
           onChange={(e) => {
             const next = e.target.value;
-            // ✅ "" 또는 숫자만 허용(0 포함)
             if (next === "" || /^\d+$/.test(next)) setQtyText(next);
           }}
-          onBlur={() => {
-            // 빈값이면 1로 복구 (원하면 제거 가능)
-            if ((qtyText ?? "").trim() === "") setQtyText("1");
-          }}
+          // ✅ onBlur 자동복구 제거 (빈값을 1로 바꾸지 않음)
           placeholder="예: 1 (0 또는 공백은 불가)"
           style={{
             border: `1px solid ${canSubmitQty ? "#e5e5e5" : "#ffb4b4"}`,
@@ -396,7 +389,6 @@ export default function ProductClient({ sku: rawSku }: Props) {
           className="input"
           type="file"
           accept="image/*"
-          // ✅ capture 속성 절대 넣지 않기(카메라 강제 방지)
           onChange={(e) => handlePickPhoto(e.target.files?.[0] || null)}
         />
         {photoPreview ? (
@@ -416,7 +408,7 @@ export default function ProductClient({ sku: rawSku }: Props) {
           <div style={{ marginTop: 8, fontSize: 13, opacity: 0.7, fontWeight: 900 }}>사진 없음</div>
         )}
 
-        {/* ✅ 회수요청 버튼 */}
+        {/* ✅ 회수요청 */}
         <div style={{ marginTop: 14 }}>
           <button
             className="btn"
@@ -448,7 +440,7 @@ export default function ProductClient({ sku: rawSku }: Props) {
         </div>
       </div>
 
-      {/* ✅ 지도/주소 */}
+      {/* ✅ 위치/지도 */}
       <div style={{ marginTop: 14 }} className="card">
         <div style={{ fontWeight: 1000, marginBottom: 8 }}>현재 위치</div>
 
@@ -464,7 +456,12 @@ export default function ProductClient({ sku: rawSku }: Props) {
               정확도: {accuracy ? `${Math.round(accuracy)}m` : "-"}
             </div>
             <div style={{ borderRadius: 14, overflow: "hidden", border: "1px solid #eee" }}>
-              <iframe title="map" src={mapEmbedSrc} style={{ width: "100%", height: 240, border: 0, display: "block" }} loading="lazy" />
+              <iframe
+                title="map"
+                src={mapEmbedSrc}
+                style={{ width: "100%", height: 240, border: 0, display: "block" }}
+                loading="lazy"
+              />
             </div>
           </>
         ) : (
