@@ -28,6 +28,29 @@ function fmtKST(ts: string) {
   return d.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
 }
 
+function accuracyBadge(acc: number | null) {
+  if (!acc || !Number.isFinite(acc)) return null;
+  const isBad = acc >= 100; // 100m 이상 빨간 배지
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 900,
+        background: isBad ? "#ffdddd" : "#eef2ff",
+        color: isBad ? "#b00020" : "#1f2a6b",
+        marginLeft: 8,
+        whiteSpace: "nowrap",
+      }}
+      title={isBad ? "정확도 낮음(100m 이상)" : "정확도 양호"}
+    >
+      {Math.round(acc)}m
+    </span>
+  );
+}
+
 function makeGoogleLink(lat: number | null, lng: number | null) {
   if (!lat || !lng) return "";
   return `https://www.google.com/maps?q=${lat},${lng}`;
@@ -37,35 +60,11 @@ function makeGoogleEmbedSrc(lat: number, lng: number) {
   return `https://www.google.com/maps?q=${lat},${lng}&z=16&output=embed`;
 }
 
-function statusLabel(v: LoadStatus | null) {
-  if (v === "O") return { text: "적재 O", bg: "#ecfff1", fg: "#166534" };
-  if (v === "X") return { text: "적재 X", bg: "#ffecec", fg: "#b00020" };
-  return { text: "알수없음", bg: "#f3f4f6", fg: "#374151" };
-}
-
-function accuracyPill(acc: number | null) {
-  if (!acc || !Number.isFinite(acc)) return null;
-  const bad = acc >= 100;
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "4px 10px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 1000,
-        background: bad ? "#ffe1e1" : "#eef2ff",
-        color: bad ? "#b00020" : "#1f2a6b",
-        whiteSpace: "nowrap",
-      }}
-      title={bad ? "정확도 낮음(100m 이상)" : "정확도 양호"}
-    >
-      정확도 {Math.round(acc)}m
-      {bad ? <span style={{ fontWeight: 1100 }}>⚠</span> : null}
-    </span>
-  );
+// ✅ 상태 뱃지: O=초록 / X=빨강
+function loadStatusChip(s: LoadStatus | null) {
+  if (s === "O") return { text: "적재 O", bg: "#ecfff1", fg: "#166534" }; // green
+  if (s === "X") return { text: "적재 X", bg: "#ffecec", fg: "#b00020" }; // red
+  return { text: "알수없음", bg: "#eef2ff", fg: "#1f2a6b" };
 }
 
 export default function AdminClient() {
@@ -73,10 +72,12 @@ export default function AdminClient() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>("");
 
+  // 검색/필터
   const [q, setQ] = useState("");
   const [skuFilter, setSkuFilter] = useState<string>("ALL");
-  const [dateFilter, setDateFilter] = useState<string>("ALL");
+  const [dateFilter, setDateFilter] = useState<string>("ALL"); // YYYY-MM-DD (KST 기준)
 
+  // 사진 모달
   const [photoModalUrl, setPhotoModalUrl] = useState<string | null>(null);
   const [photoModalTitle, setPhotoModalTitle] = useState<string>("");
 
@@ -113,7 +114,7 @@ export default function AdminClient() {
     for (let i = 0; i < rows.length; i++) {
       const d = new Date(rows[i].created_at);
       if (Number.isNaN(d.getTime())) continue;
-      const kst = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+      const kst = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }); // YYYY-MM-DD
       s.add(kst);
     }
     return ["ALL", ...Array.from(s).sort().reverse()];
@@ -121,12 +122,14 @@ export default function AdminClient() {
 
   const filtered = useMemo(() => {
     const text = (q || "").trim().toUpperCase();
+    const fSku = skuFilter;
+
     const out: PickupRow[] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
 
-      if (skuFilter !== "ALL" && String(r.sku || "").toUpperCase() !== skuFilter) continue;
+      if (fSku !== "ALL" && String(r.sku || "").toUpperCase() !== fSku) continue;
 
       if (dateFilter !== "ALL") {
         const d = new Date(r.created_at);
@@ -139,13 +142,14 @@ export default function AdminClient() {
         const sku = (r.sku || "").toUpperCase();
         const addr = (r.address || "").toUpperCase();
         const note = (r.note || "").toUpperCase();
-        if (!(item.includes(text) || sku.includes(text) || addr.includes(text) || note.includes(text))) continue;
+
+        const hit = item.includes(text) || sku.includes(text) || addr.includes(text) || note.includes(text);
+        if (!hit) continue;
       }
 
       out.push(r);
     }
 
-    // 검색 시 완전 일치 우선
     if (text) {
       out.sort((a, b) => {
         const aItem = (a.item_no || "").toUpperCase();
@@ -175,55 +179,59 @@ export default function AdminClient() {
   };
 
   return (
-    <div className="wrap">
+    <div className="adminWrap">
       <style jsx>{`
-        :global(body) {
-          background: #f6f7fb;
-        }
-
-        /* ✅ PC에서도 "모바일 느낌" 고정 */
-        .wrap {
+        .adminWrap {
           width: 100%;
-          max-width: 560px;
+          max-width: 980px;
           margin: 0 auto;
-          padding: 12px;
+          padding: 16px;
           font-family: system-ui;
           box-sizing: border-box;
         }
 
-        .topBar {
-          position: sticky;
-          top: 0;
-          z-index: 20;
-          background: rgba(246, 247, 251, 0.9);
-          backdrop-filter: blur(8px);
-          padding: 10px 0 10px;
-        }
-
-        .title {
-          font-size: 20px;
-          font-weight: 1000;
-          margin: 0 0 10px 0;
-        }
-
         .toolbar {
           display: grid;
-          grid-template-columns: 1fr;
-          gap: 8px;
+          grid-template-columns: 1fr 180px 180px 120px;
+          gap: 10px;
+          align-items: center;
+          margin-bottom: 12px;
         }
 
-        .row2 {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 8px;
+        @media (max-width: 900px) {
+          .adminWrap {
+            max-width: 100%;
+            padding: 12px;
+          }
+          .toolbar {
+            grid-template-columns: 1fr 1fr;
+          }
+          .toolbar .search {
+            grid-column: 1 / -1;
+          }
+          .toolbar .refresh {
+            grid-column: 1 / -1;
+          }
+        }
+
+        @media (max-width: 520px) {
+          .toolbar {
+            grid-template-columns: 1fr;
+          }
+          .toolbar .search,
+          .toolbar .sku,
+          .toolbar .date,
+          .toolbar .refresh {
+            grid-column: auto;
+          }
         }
 
         .input,
         .select {
           width: 100%;
-          padding: 11px 12px;
-          border-radius: 12px;
-          border: 1px solid #e5e7eb;
+          padding: 10px 12px;
+          border-radius: 10px;
+          border: 1px solid #e5e5e5;
           font-size: 14px;
           background: #fff;
           box-sizing: border-box;
@@ -231,187 +239,105 @@ export default function AdminClient() {
 
         .btn {
           width: 100%;
-          padding: 11px 12px;
-          border-radius: 12px;
+          padding: 10px 12px;
+          border-radius: 10px;
           border: none;
-          font-weight: 1000;
-          cursor: pointer;
-          background: #3b5bff;
-          color: #fff;
-        }
-
-        .btn:disabled {
-          background: #c9d3ff;
-          cursor: not-allowed;
-        }
-
-        .err {
-          margin-top: 10px;
-          padding: 10px;
-          border-radius: 12px;
-          background: #ffecec;
-          color: #b00020;
           font-weight: 900;
-        }
-
-        .list {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          padding-bottom: 18px;
+          cursor: pointer;
         }
 
         .card {
-          border: 1px solid #e5e7eb;
-          border-radius: 16px;
+          border: 1px solid #e5e5e5;
+          border-radius: 14px;
+          padding: 12px;
           background: #fff;
-          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-          overflow: hidden;
-        }
-
-        .cardHeader {
-          padding: 12px 12px 10px;
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 10px;
-        }
-
-        .hLeft {
-          display: grid;
-          gap: 6px;
-        }
-
-        .hTitle {
-          font-weight: 1000;
-          font-size: 15px;
-          line-height: 1.2;
-        }
-
-        .sub {
-          font-size: 12px;
-          opacity: 0.7;
-        }
-
-        .pills {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-
-        .pill {
-          padding: 4px 10px;
-          border-radius: 999px;
-          font-size: 12px;
-          font-weight: 1000;
-          background: #f3f4f6;
-          color: #374151;
-          white-space: nowrap;
-        }
-
-        .body {
-          padding: 0 12px 12px;
-          display: grid;
-          gap: 10px;
-        }
-
-        .kv {
-          display: grid;
-          gap: 6px;
-          font-size: 13px;
-          line-height: 1.45;
-        }
-
-        .kv b {
-          font-weight: 1000;
-        }
-
-        .actions {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-
-        .actionBtn, .actionLink {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          padding: 10px 12px;
-          border-radius: 12px;
-          border: 1px solid #e5e7eb;
-          background: #fff;
-          font-weight: 1000;
-          font-size: 13px;
-          cursor: pointer;
-          text-decoration: none;
-          color: #111827;
-          flex: 1 1 auto;
-          min-width: 120px;
-        }
-
-        .actionBtn:disabled {
-          opacity: 0.45;
-          cursor: not-allowed;
         }
 
         .mapBox {
-          border: 1px solid #e5e7eb;
-          border-radius: 14px;
+          border: 1px solid #e5e5e5;
+          border-radius: 12px;
           overflow: hidden;
-          background: #fafafa;
         }
 
         .mapFrame {
           border: 0;
           display: block;
           width: 100%;
-          height: 230px;
+          height: 240px;
         }
 
-        .highlight {
-          background: #fff7cc;
+        @media (max-width: 520px) {
+          .mapFrame {
+            height: 220px;
+          }
+        }
+
+        .actions {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-top: 10px;
+          margin-bottom: 10px;
+        }
+
+        .actionBtn {
+          padding: 8px 10px;
+          border-radius: 10px;
+          border: 1px solid #e5e5e5;
+          background: #fff;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .link {
+          font-weight: 900;
+          text-decoration: none;
         }
       `}</style>
 
-      <div className="topBar">
-        <h1 className="title">회수 요청 목록</h1>
+      <h1 style={{ fontSize: 22, marginBottom: 10 }}>회수 요청 목록</h1>
 
-        <div className="toolbar">
-          <input
-            className="input"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="개별번호/제품/주소/비고 검색 (예: KDA0001, K)"
-          />
+      <div className="toolbar">
+        <input
+          className="input search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="개별번호/제품/주소/비고 검색 (예: KDA0001, K)"
+        />
 
-          <div className="row2">
-            <select className="select" value={skuFilter} onChange={(e) => setSkuFilter(e.target.value)}>
-              {skuOptions.map((s) => (
-                <option key={s} value={s}>
-                  {s === "ALL" ? "제품 전체" : s}
-                </option>
-              ))}
-            </select>
+        <select className="select sku" value={skuFilter} onChange={(e) => setSkuFilter(e.target.value)}>
+          {skuOptions.map((s) => (
+            <option key={s} value={s}>
+              {s === "ALL" ? "제품 전체" : s}
+            </option>
+          ))}
+        </select>
 
-            <select className="select" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}>
-              {dateOptions.map((d) => (
-                <option key={d} value={d}>
-                  {d === "ALL" ? "날짜 전체" : d}
-                </option>
-              ))}
-            </select>
-          </div>
+        <select className="select date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}>
+          {dateOptions.map((d) => (
+            <option key={d} value={d}>
+              {d === "ALL" ? "날짜 전체" : d}
+            </option>
+          ))}
+        </select>
 
-          <button className="btn" onClick={fetchList} disabled={loading}>
-            {loading ? "로딩..." : "새로고침"}
-          </button>
-
-          {err ? <div className="err">{err}</div> : null}
-        </div>
+        <button
+          className="btn refresh"
+          onClick={fetchList}
+          disabled={loading}
+          style={{ cursor: loading ? "not-allowed" : "pointer" }}
+        >
+          {loading ? "로딩..." : "새로고침"}
+        </button>
       </div>
 
-      <div className="list">
+      {err && (
+        <div style={{ marginBottom: 10, padding: 10, borderRadius: 10, background: "#ffecec", color: "#b00020" }}>
+          {err}
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {filtered.map((r) => {
           const item = (r.item_no || "").toUpperCase();
           const isHighlight = exactMatchItem && item && item === exactMatchItem;
@@ -419,76 +345,91 @@ export default function AdminClient() {
           const title = `${String(r.sku || "").toUpperCase()}${r.item_no ? ` / ${r.item_no}` : ""}`;
           const hasCoord = !!(r.lat && r.lng);
 
-          const st = statusLabel(r.load_status);
+          const st = loadStatusChip(r.load_status);
 
           return (
-            <div key={r.id} className={`card ${isHighlight ? "highlight" : ""}`}>
-              <div className="cardHeader">
-                <div className="hLeft">
-                  <div className="hTitle">{title}</div>
-                  <div className="pills">
-                    <span className="pill" style={{ background: st.bg, color: st.fg }}>
-                      {st.text}
-                    </span>
-                    <span className="pill">수량 {r.qty ?? 1}</span>
-                    {accuracyPill(r.accuracy)}
-                  </div>
-                  <div className="sub">{fmtKST(r.created_at)}</div>
+            <div key={r.id} className="card" style={{ background: isHighlight ? "#fff7cc" : "#fff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 1000, fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span>{title}</span>
+
+                  {/* ✅ 상태 뱃지 */}
+                  <span
+                    style={{
+                      display: "inline-block",
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      fontSize: 12,
+                      fontWeight: 1000,
+                      background: st.bg,
+                      color: st.fg,
+                      whiteSpace: "nowrap",
+                    }}
+                    title="상태"
+                  >
+                    {st.text}
+                  </span>
+
+                  {accuracyBadge(r.accuracy)}
                 </div>
+                <div style={{ opacity: 0.75, fontSize: 13 }}>{fmtKST(r.created_at)}</div>
               </div>
 
-              <div className="body">
-                <div className="kv">
-                  <div>
-                    <b>주소:</b> {r.address || "주소 없음"}
-                  </div>
-                  {r.note ? (
-                    <div>
-                      <b>비고:</b> {r.note}
-                    </div>
-                  ) : null}
-                </div>
-
-                {/* ✅ 액션 버튼 */}
-                <div className="actions">
-                  <a
-                    className="actionLink"
-                    href={makeGoogleLink(r.lat, r.lng) || "#"}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ pointerEvents: hasCoord ? "auto" : "none", opacity: hasCoord ? 1 : 0.45 }}
-                  >
-                    📍 지도 열기
-                  </a>
-
-                  <button
-                    className="actionBtn"
-                    onClick={() => r.photo_url && openPhoto(r.photo_url, title)}
-                    disabled={!r.photo_url}
-                    title={r.photo_url ? "사진 보기" : "사진 없음"}
-                  >
-                    🖼 {r.photo_url ? "사진보기" : "사진없음"}
-                  </button>
-                </div>
-
-                {/* ✅ 지도 */}
+              <div style={{ marginTop: 8, fontSize: 14, lineHeight: 1.55 }}>
                 <div>
-                  {hasCoord ? (
-                    <div className="mapBox">
-                      <iframe
-                        key={`${r.lat},${r.lng}`}
-                        title={`map-${r.id}`}
-                        className="mapFrame"
-                        src={makeGoogleEmbedSrc(r.lat as number, r.lng as number)}
-                        loading="lazy"
-                      />
-                    </div>
-                  ) : (
-                    <div style={{ padding: 12, borderRadius: 12, border: "1px dashed #ddd", opacity: 0.7 }}>
-                      좌표 없음
-                    </div>
-                  )}
+                  <b>주소:</b> {r.address || "주소 없음"}
                 </div>
+                <div>
+                  <b>수량:</b> {r.qty ?? 1}
+                </div>
+                {r.note ? (
+                  <div>
+                    <b>비고:</b> {r.note}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="actions">
+                <a
+                  className="link"
+                  href={makeGoogleLink(r.lat, r.lng) || "#"}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ pointerEvents: hasCoord ? "auto" : "none", opacity: hasCoord ? 1 : 0.45 }}
+                >
+                  구글지도 열기
+                </a>
+
+                <button
+                  className="actionBtn"
+                  onClick={() => r.photo_url && openPhoto(r.photo_url, title)}
+                  disabled={!r.photo_url}
+                  style={{
+                    cursor: r.photo_url ? "pointer" : "not-allowed",
+                    opacity: r.photo_url ? 1 : 0.45,
+                  }}
+                  title={r.photo_url ? "사진 보기" : "사진 없음"}
+                >
+                  {r.photo_url ? "사진보기" : "사진없음"}
+                </button>
+              </div>
+
+              <div>
+                {hasCoord ? (
+                  <div className="mapBox">
+                    <iframe
+                      key={`${r.lat},${r.lng}`}
+                      title={`map-${r.id}`}
+                      className="mapFrame"
+                      src={makeGoogleEmbedSrc(r.lat as number, r.lng as number)}
+                      loading="lazy"
+                    />
+                  </div>
+                ) : (
+                  <div style={{ padding: 12, borderRadius: 12, border: "1px dashed #ddd", opacity: 0.7 }}>
+                    좌표 없음
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -501,7 +442,6 @@ export default function AdminClient() {
         )}
       </div>
 
-      {/* ✅ 사진 모달 (너가 '완벽'이라 한 버전 유지) */}
       {photoModalUrl && (
         <div
           onClick={closePhoto}
