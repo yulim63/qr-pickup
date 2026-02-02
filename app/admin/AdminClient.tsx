@@ -320,62 +320,101 @@ export default function AdminClient() {
       </div>
 
       {/* ✅ 사진 모달 */}
-      {photoModalUrl && (
-        <div
+      {/* ✅ 사진 모달 (부모/화면 넘어가지 않게 크기 제한) */}
+{photoModalUrl && (
+  <div
+    onClick={closePhoto}
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.55)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 14,
+      zIndex: 9999,
+    }}
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        width: "min(920px, calc(100vw - 28px))",   // ✅ 화면 폭 넘지 않게
+        maxHeight: "calc(100vh - 28px)",          // ✅ 화면 높이 넘지 않게
+        background: "#fff",
+        borderRadius: 16,
+        overflow: "hidden",
+        boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+        display: "flex",
+        flexDirection: "column",                  // ✅ 헤더+본문 분리
+      }}
+    >
+      {/* 헤더 */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+          padding: "12px 14px",
+          borderBottom: "1px solid #eee",
+          flex: "0 0 auto",
+        }}
+      >
+        <div style={{ fontWeight: 1000, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {photoModalTitle}
+        </div>
+        <button
           onClick={closePhoto}
           style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.55)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 14,
-            zIndex: 9999,
+            padding: "8px 10px",
+            borderRadius: 10,
+            border: "1px solid #e5e5e5",
+            background: "#fff",
+            fontWeight: 900,
+            cursor: "pointer",
+            flex: "0 0 auto",
           }}
         >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: "min(920px, 100%)",
-              background: "#fff",
-              borderRadius: 16,
-              overflow: "hidden",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px 14px", borderBottom: "1px solid #eee" }}>
-              <div style={{ fontWeight: 1000 }}>{photoModalTitle}</div>
-              <button
-                onClick={closePhoto}
-                style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e5e5", background: "#fff", fontWeight: 900, cursor: "pointer" }}
-              >
-                닫기
-              </button>
-            </div>
+          닫기
+        </button>
+      </div>
 
-            <div style={{ padding: 14 }}>
-              <img
-                src={photoModalUrl}
-                alt="photo"
-                style={{
-                  width: "100%",
-                  maxHeight: "70vh",
-                  objectFit: "contain",
-                  display: "block",
-                  borderRadius: 12,
-                  background: "#fafafa",
-                }}
-              />
-              <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
-                <a href={photoModalUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 900 }}>
-                  원본 새창
-                </a>
-              </div>
-            </div>
-          </div>
+      {/* 본문(스크롤 가능) */}
+      <div
+        style={{
+          padding: 14,
+          overflow: "auto",                        // ✅ 넘치면 스크롤
+          flex: "1 1 auto",
+        }}
+      >
+        <div
+          style={{
+            width: "100%",
+            background: "#fafafa",
+            borderRadius: 12,
+            border: "1px solid #eee",
+            overflow: "hidden",
+          }}
+        >
+          <img
+            src={photoModalUrl}
+            alt="photo"
+            style={{
+              width: "100%",
+              maxHeight: "70vh",                   // ✅ 이미지도 과하게 커지지 않게
+              objectFit: "contain",
+              display: "block",
+            }}
+          />
         </div>
-      )}
+
+        <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+          <a href={photoModalUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 900 }}>
+            원본 새창
+          </a>
+        </div>
+      </div>
     </div>
-  );
-}
+  </div>
+)}
+
