@@ -7,9 +7,9 @@ type Product = { name: string; img: string };
 type LoadStatus = "O" | "X" | "UNKNOWN";
 
 const PRODUCTS: Record<string, Product> = {
-  BPS: { name: "BPS", img: "/products/BPS.JPG" },
-  MS108: { name: "MS108", img: "/products/MS108.JPG" },
-  MS112: { name: "MS112", img: "/products/MS112.JPG" },
+  BPS: { name: "BPS", img: "/products/BPS.jpg" },
+  MS108: { name: "MS108", img: "/products/MS108.jpg" },
+  MS112: { name: "MS112", img: "/products/MS112.jpg" },
 };
 
 type Props = {
