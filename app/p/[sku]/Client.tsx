@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { PRODUCTS } from "@/lib/products";
 
 function makeGoogleEmbedSrc(lat: number, lng: number) {
@@ -87,7 +87,6 @@ export default function ProductClient({ sku }: { sku: string }) {
   const [submitted, setSubmitted] = useState(false);
 
   const [qty, setQty] = useState<number>(1);
-
   const [loadStatus, setLoadStatus] = useState<"O" | "X" | "UNKNOWN">("UNKNOWN");
   const [note, setNote] = useState<string>("");
 
@@ -96,6 +95,10 @@ export default function ProductClient({ sku }: { sku: string }) {
 
   const [lastCoord, setLastCoord] = useState<{ lat: number; lng: number; acc?: number } | null>(null);
   const [address, setAddress] = useState<string>("");
+
+  // ✅ 갤러리/카메라 선택용 input ref
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   if (!product) {
     return (
@@ -332,20 +335,84 @@ export default function ProductClient({ sku }: { sku: string }) {
         <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>{note.length}/100</div>
       </div>
 
+      {/* ✅ 사진 첨부: 갤러리/카메라 선택 */}
       <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>사진 첨부(선택) - JPG/PNG/WebP</div>
+        <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>
+          사진 첨부(선택) - JPG/PNG/WebP
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => galleryInputRef.current?.click()}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid #e5e5e5",
+              background: "#fff",
+              fontWeight: 900,
+              cursor: "pointer",
+            }}
+          >
+            갤러리 선택
+          </button>
+
+          <button
+            type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid #e5e5e5",
+              background: "#fff",
+              fontWeight: 900,
+              cursor: "pointer",
+            }}
+          >
+            카메라 촬영
+          </button>
+        </div>
+
         <input
+          ref={galleryInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          style={{ display: "none" }}
+          onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
+        />
+
+        <input
+          ref={cameraInputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp"
           capture="environment"
+          style={{ display: "none" }}
           onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
         />
 
         {photoInfo && <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>{photoInfo}</div>}
 
+        {/* ✅ 미리보기 크기 제한 */}
         {photoDataUrl && (
-          <div style={{ marginTop: 8, border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>
-            <img src={photoDataUrl} alt="preview" style={{ width: "100%", display: "block" }} />
+          <div
+            style={{
+              marginTop: 8,
+              border: "1px solid #e5e5e5",
+              borderRadius: 12,
+              overflow: "hidden",
+              background: "#fafafa",
+            }}
+          >
+            <img
+              src={photoDataUrl}
+              alt="preview"
+              style={{
+                width: "100%",
+                maxHeight: 260,
+                objectFit: "contain",
+                display: "block",
+              }}
+            />
           </div>
         )}
       </div>

@@ -119,10 +119,8 @@ export default function AdminClient() {
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
 
-      // 제품 필터
       if (fSku !== "ALL" && String(r.sku || "").toUpperCase() !== fSku) continue;
 
-      // 날짜 필터 (KST)
       if (dateFilter !== "ALL") {
         const d = new Date(r.created_at);
         const kst = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
@@ -135,7 +133,6 @@ export default function AdminClient() {
         const addr = (r.address || "").toUpperCase();
         const note = (r.note || "").toUpperCase();
 
-        // "K"만 쳐도 item_no 기준으로 매칭되게 + sku/주소/비고도 같이
         const hit =
           item.includes(text) || sku.includes(text) || addr.includes(text) || note.includes(text);
         if (!hit) continue;
@@ -144,7 +141,6 @@ export default function AdminClient() {
       out.push(r);
     }
 
-    // 검색어가 item_no와 완전 일치하면 맨 위로 올리고 하이라이트 대상이 되도록 정렬
     if (text) {
       out.sort((a, b) => {
         const aItem = (a.item_no || "").toUpperCase();
@@ -152,12 +148,9 @@ export default function AdminClient() {
         const aExact = aItem === text ? 1 : 0;
         const bExact = bItem === text ? 1 : 0;
         if (aExact !== bExact) return bExact - aExact;
-
-        // 최신순
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       });
     } else {
-      // 기본 최신순
       out.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
 
@@ -180,7 +173,6 @@ export default function AdminClient() {
     <div style={{ padding: 16, fontFamily: "system-ui", maxWidth: 980, margin: "0 auto" }}>
       <h1 style={{ fontSize: 22, marginBottom: 10 }}>회수 요청 목록</h1>
 
-      {/* 필터/검색 */}
       <div
         style={{
           display: "grid",
@@ -257,14 +249,12 @@ export default function AdminClient() {
         </button>
       </div>
 
-      {/* 오류 */}
       {err && (
         <div style={{ marginBottom: 10, padding: 10, borderRadius: 10, background: "#ffecec", color: "#b00020" }}>
           {err}
         </div>
       )}
 
-      {/* 리스트 */}
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {filtered.map((r) => {
           const item = (r.item_no || "").toUpperCase();
@@ -335,7 +325,7 @@ export default function AdminClient() {
                   }}
                   title={r.photo_url ? "사진 보기" : "사진 없음"}
                 >
-                  {r.photo_url ? "사진 보기" : "사진 없음"}
+                  {r.photo_url ? "사진보기" : "사진없음"}
                 </button>
               </div>
             </div>
@@ -349,7 +339,7 @@ export default function AdminClient() {
         )}
       </div>
 
-      {/* 사진 모달 */}
+      {/* ✅ 사진 모달 */}
       {photoModalUrl && (
         <div
           onClick={closePhoto}
@@ -404,15 +394,17 @@ export default function AdminClient() {
               <img
                 src={photoModalUrl}
                 alt="photo"
-                style={{ width: "100%", height: "auto", display: "block", borderRadius: 12 }}
+                style={{
+                  width: "100%",
+                  maxHeight: "70vh",
+                  objectFit: "contain",
+                  display: "block",
+                  borderRadius: 12,
+                  background: "#fafafa",
+                }}
               />
               <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
-                <a
-                  href={photoModalUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ fontWeight: 900 }}
-                >
+                <a href={photoModalUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 900 }}>
                   원본 새창
                 </a>
               </div>
