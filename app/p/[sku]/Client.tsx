@@ -17,10 +17,9 @@ function makeOsmEmbedSrc(lat: number, lng: number) {
 }
 
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
-const MAX_EDGE = 1280;     // ✅ 최대 가로/세로
-const JPEG_QUALITY = 0.72; // ✅ 압축 품질(0~1)
+const MAX_EDGE = 1280;
+const JPEG_QUALITY = 0.72;
 
-// 파일 -> 이미지 로드
 function loadImageFromFile(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -37,7 +36,6 @@ function loadImageFromFile(file: File): Promise<HTMLImageElement> {
   });
 }
 
-// 이미지 압축: 리사이즈 + JPEG 변환(용량 확 줄어듦)
 async function compressToJpegDataUrl(file: File): Promise<string> {
   const img = await loadImageFromFile(file);
 
@@ -47,7 +45,6 @@ async function compressToJpegDataUrl(file: File): Promise<string> {
   let newW = w;
   let newH = h;
 
-  // ✅ 긴 변을 MAX_EDGE로 축소
   if (Math.max(w, h) > MAX_EDGE) {
     if (w >= h) {
       newW = MAX_EDGE;
@@ -65,29 +62,22 @@ async function compressToJpegDataUrl(file: File): Promise<string> {
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("캔버스 생성 실패");
 
-  // ✅ 고급 리사이즈(브라우저 지원 시)
   // @ts-ignore
   ctx.imageSmoothingEnabled = true;
   // @ts-ignore
   ctx.imageSmoothingQuality = "high";
 
-  // 배경 흰색(투명 PNG도 흰 배경으로 변환)
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, newW, newH);
-
   ctx.drawImage(img, 0, 0, newW, newH);
 
-  // ✅ JPEG로 변환해 용량 절감 (PNG 그대로면 커질 때가 많음)
-  const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
-  return dataUrl;
+  return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
 }
 
-// dataURL 대략 용량(바이트) 계산(표시용)
 function estimateDataUrlBytes(dataUrl: string) {
   const idx = dataUrl.indexOf("base64,");
   if (idx < 0) return 0;
   const b64 = dataUrl.slice(idx + 7);
-  // base64 -> bytes 대략치
   return Math.floor((b64.length * 3) / 4);
 }
 
@@ -104,9 +94,17 @@ export default function ProductClient({ sku }: { sku: string }) {
 
   const [qty, setQty] = useState<number>(1);
 
+  // ✅ 상태 라디오 (O/X/UNKNOWN)
+  const [loadStatus, setLoadStatus] = useState<"O" | "X" | "UNKNOWN">("UNKNOWN");
+
+  // ✅ 비고(100자)
+  const [note, setNote] = useState<string>("");
+
+  // 사진(선택)
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [photoInfo, setPhotoInfo] = useState<string>("");
 
+  // 지도/주소 표시
   const [lastCoord, setLastCoord] = useState<{ lat: number; lng: number; acc?: number } | null>(null);
   const [address, setAddress] = useState<string>("");
 
@@ -130,7 +128,6 @@ export default function ProductClient({ sku }: { sku: string }) {
         return;
       }
 
-      // ✅ 형식 제한
       if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
         setStatus("사진 파일만 업로드 가능합니다. (JPG/PNG/WebP)");
         setPhotoDataUrl(null);
@@ -139,13 +136,11 @@ export default function ProductClient({ sku }: { sku: string }) {
 
       setStatus("사진 압축 중...");
 
-      // ✅ 자동 압축/리사이즈 → JPEG dataURL
       const dataUrl = await compressToJpegDataUrl(file);
 
-      // 용량 표시 (선택)
       const bytes = estimateDataUrlBytes(dataUrl);
       const kb = Math.round(bytes / 1024);
-      setPhotoInfo(`압축 완료: 약 ${kb}KB (최대변 ${MAX_EDGE}px, JPEG 품질 ${JPEG_QUALITY})`);
+      setPhotoInfo(`압축 완료: 약 ${kb}KB`);
 
       setPhotoDataUrl(dataUrl);
       setStatus("");
@@ -167,6 +162,8 @@ export default function ProductClient({ sku }: { sku: string }) {
     if (!Number.isFinite(qtySend) || qtySend <= 0) qtySend = 1;
     if (qtySend > 999) qtySend = 999;
 
+    const noteSend = (note || "").trim().slice(0, 100);
+
     const TARGET_ACCURACY_M = 30;
     const MAX_WAIT_MS = 15000;
 
@@ -187,7 +184,9 @@ export default function ProductClient({ sku }: { sku: string }) {
         sku: product.sku,
         itemNo: itemNo || null,
         qty: qtySend,
-        photoDataUrl: photoDataUrl || null, // ✅ 압축된 JPEG dataURL
+        loadStatus,          // ✅ 추가
+        note: noteSend,      // ✅ 추가
+        photoDataUrl: photoDataUrl || null,
         lat: pos.coords.latitude,
         lng: pos.coords.longitude,
         accuracy: pos.coords.accuracy ?? null,
@@ -283,6 +282,29 @@ export default function ProductClient({ sku }: { sku: string }) {
 
       <p style={{ marginTop: 14, lineHeight: 1.5 }}>{product.message}</p>
 
+      {/* ✅ 상태 확인 라디오 */}
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>상태 확인</div>
+
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+            <input type="radio" name="loadStatus" checked={loadStatus === "O"} onChange={() => setLoadStatus("O")} />
+            적재 O
+          </label>
+
+          <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+            <input type="radio" name="loadStatus" checked={loadStatus === "X"} onChange={() => setLoadStatus("X")} />
+            적재 X
+          </label>
+
+          <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+            <input type="radio" name="loadStatus" checked={loadStatus === "UNKNOWN"} onChange={() => setLoadStatus("UNKNOWN")} />
+            알수없음
+          </label>
+        </div>
+      </div>
+
+      {/* 수량 */}
       <div style={{ marginTop: 12 }}>
         <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>수량</div>
         <input
@@ -295,9 +317,38 @@ export default function ProductClient({ sku }: { sku: string }) {
         />
       </div>
 
+      {/* ✅ 비고 */}
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>비고</div>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value.slice(0, 100))}
+          maxLength={100}
+          placeholder="최대 100글자 (특이사항 및 연락처 등 입력)"
+          style={{
+            width: "100%",
+            minHeight: 80,
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "1px solid #e5e5e5",
+            fontSize: 14,
+            resize: "vertical",
+          }}
+        />
+        <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
+          {note.length}/100
+        </div>
+      </div>
+
+      {/* 사진 */}
       <div style={{ marginTop: 12 }}>
         <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>사진 첨부(선택) - JPG/PNG/WebP</div>
-        <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)} />
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          capture="environment"
+          onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
+        />
 
         {photoInfo && <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>{photoInfo}</div>}
 
@@ -308,6 +359,7 @@ export default function ProductClient({ sku }: { sku: string }) {
         )}
       </div>
 
+      {/* 버튼 */}
       <button
         onClick={requestPickup}
         disabled={sending || submitted}
@@ -328,25 +380,23 @@ export default function ProductClient({ sku }: { sku: string }) {
 
       {status && <div style={{ marginTop: 12, fontSize: 14, opacity: 0.9 }}>{status}</div>}
 
-      {submitted && address && (
+      {/* ✅ 좌표 대신 주소 표시 */}
+      {submitted && (
         <div style={{ marginTop: 10, fontSize: 13, opacity: 0.9 }}>
-          주소: {address}
+          주소: {address ? address : "주소 확인 중..."}
         </div>
       )}
 
+      {/* 지도 */}
       {lastCoord && Number.isFinite(lastCoord.lat) && Number.isFinite(lastCoord.lng) && (
         <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 14, marginBottom: 8, opacity: 0.9 }}>
-            내 위치 (정확도 약 {lastCoord.acc ? Math.round(lastCoord.acc) : "-"}m)
-          </div>
-
           <a
             href={`https://www.google.com/maps?q=${lastCoord.lat},${lastCoord.lng}`}
             target="_blank"
             rel="noreferrer"
             style={{ display: "inline-block", marginBottom: 10, fontWeight: 800 }}
           >
-            구글지도에서 열기
+            구글지도 열기
           </a>
 
           <div style={{ border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>

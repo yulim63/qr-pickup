@@ -7,7 +7,6 @@ import { PRODUCTS } from "@/lib/products";
 const BUCKET = "pickup-photos";
 
 function parseDataUrl(dataUrl: string): { mime: string; buffer: Buffer } | null {
-  // data:image/jpeg;base64,xxxxx
   if (!dataUrl || typeof dataUrl !== "string") return null;
   const m = dataUrl.match(/^data:(.+);base64,(.*)$/);
   if (!m) return null;
@@ -27,10 +26,7 @@ async function reverseGeocode(lat: number, lng: number): Promise<string | null> 
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=ko`;
 
     const res = await fetch(url, {
-      headers: {
-        // Nominatim은 User-Agent 요구하는 편이라 넣어줌
-        "User-Agent": "qr-pickup/1.0 (vercel)",
-      },
+      headers: { "User-Agent": "qr-pickup/1.0 (vercel)" },
       cache: "no-store",
     });
 
@@ -58,6 +54,15 @@ export async function POST(req: Request) {
     if (!Number.isFinite(qty) || qty <= 0) qty = 1;
     if (qty > 999) qty = 999;
 
+    // ✅ 상태 / 비고
+    const loadStatusRaw = String(body?.loadStatus || "UNKNOWN").toUpperCase();
+    const loadStatus =
+      loadStatusRaw === "O" || loadStatusRaw === "X" ? loadStatusRaw : "UNKNOWN";
+
+    let note = body?.note == null ? "" : String(body.note);
+    note = note.trim();
+    if (note.length > 100) note = note.slice(0, 100);
+
     const photoDataUrl = body?.photoDataUrl ? String(body.photoDataUrl) : null;
 
     if (!PRODUCTS[sku]) return new NextResponse("Invalid sku", { status: 400 });
@@ -67,7 +72,7 @@ export async function POST(req: Request) {
 
     const sb = supabaseServer();
 
-    // 1) 주소 reverse geocode (실패해도 null로 진행)
+    // 1) 주소
     const address = await reverseGeocode(lat, lng);
 
     // 2) 사진 업로드(선택)
@@ -93,7 +98,6 @@ export async function POST(req: Request) {
         });
 
       if (!upErr) {
-        // public bucket 기준 공개 URL
         const { data } = sb.storage.from(BUCKET).getPublicUrl(filePath);
         photoUrl = data?.publicUrl ?? null;
       }
@@ -105,6 +109,8 @@ export async function POST(req: Request) {
         sku,
         item_no: itemNo,
         qty,
+        load_status: loadStatus,
+        note,
         lat,
         lng,
         accuracy,
