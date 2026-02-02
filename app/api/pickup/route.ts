@@ -23,7 +23,8 @@ function parseDataUrl(dataUrl: string): { mime: string; buffer: Buffer } | null 
 async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
   try {
     const url =
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=ko`;
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}` +
+      `&zoom=18&addressdetails=1&accept-language=ko`;
 
     const res = await fetch(url, {
       headers: { "User-Agent": "qr-pickup/1.0 (vercel)" },
@@ -54,10 +55,8 @@ export async function POST(req: Request) {
     if (!Number.isFinite(qty) || qty <= 0) qty = 1;
     if (qty > 999) qty = 999;
 
-    // ✅ 상태 / 비고
     const loadStatusRaw = String(body?.loadStatus || "UNKNOWN").toUpperCase();
-    const loadStatus =
-      loadStatusRaw === "O" || loadStatusRaw === "X" ? loadStatusRaw : "UNKNOWN";
+    const loadStatus = loadStatusRaw === "O" || loadStatusRaw === "X" ? loadStatusRaw : "UNKNOWN";
 
     let note = body?.note == null ? "" : String(body.note);
     note = note.trim();
@@ -72,10 +71,10 @@ export async function POST(req: Request) {
 
     const sb = supabaseServer();
 
-    // 1) 주소
+    // 주소(없어도 insert는 되게)
     const address = await reverseGeocode(lat, lng);
 
-    // 2) 사진 업로드(선택)
+    // ✅ 사진 업로드(선택) - 실패하면 절대 넘어가지 않음
     let photoUrl: string | null = null;
 
     if (photoDataUrl) {
@@ -97,13 +96,18 @@ export async function POST(req: Request) {
           upsert: false,
         });
 
-      if (!upErr) {
-        const { data } = sb.storage.from(BUCKET).getPublicUrl(filePath);
-        photoUrl = data?.publicUrl ?? null;
+      if (upErr) {
+        return new NextResponse(`Photo upload failed: ${upErr.message}`, { status: 500 });
+      }
+
+      const { data } = sb.storage.from(BUCKET).getPublicUrl(filePath);
+      photoUrl = data?.publicUrl ?? null;
+
+      if (!photoUrl) {
+        return new NextResponse("Photo upload succeeded but public URL is null", { status: 500 });
       }
     }
 
-    // 3) DB insert
     const { error } = await sb.from("pickup_requests").insert([
       {
         sku,
