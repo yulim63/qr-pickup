@@ -6,9 +6,9 @@ import { useMemo, useRef, useState } from "react";
 type LoadStatus = "O" | "X" | "UNKNOWN";
 
 const PRODUCTS: Record<string, { name: string; img: string; desc: string }> = {
-  BPS: { name: "BPS", img: "/products/BPS.JPG", desc: "BPS 회수 요청" },
-  MS108: { name: "MS108", img: "/products/MS108.JPG", desc: "MS108 회수 요청" },
-  MS112: { name: "MS112", img: "/products/MS112.JPG", desc: "MS112 회수 요청" },
+  BPS: { name: "BPS", img: "/products/BPS.jpg", desc: "BPS 회수 요청" },
+  MS108: { name: "MS108", img: "/products/MS108.jpg", desc: "MS108 회수 요청" },
+  MS112: { name: "MS112", img: "/products/MS112.jpg", desc: "MS112 회수 요청" },
 };
 
 function parseSkuAndItem(raw: string) {
@@ -447,7 +447,7 @@ export default function ProductClient({ sku: rawSku }: Props) {
         {address ? (
           <div style={{ marginBottom: 8, fontWeight: 900, opacity: 0.85 }}>{address}</div>
         ) : (
-          <div style={{ marginBottom: 8, fontWeight: 900, opacity: 0.6 }}>주소는 전송 후 자동 표시됩니다.</div>
+          <div style={{ marginBottom: 8, fontWeight: 900, opacity: 0.6 }}></div>
         )}
 
         {lat && lng ? (
