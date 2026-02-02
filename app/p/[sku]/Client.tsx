@@ -95,7 +95,9 @@ export default function ProductClient({ rawSku }: Props) {
 
   const [address, setAddress] = useState<string>("");
 
+  // ✅ 수량 0 가능
   const [qty, setQty] = useState<number>(1);
+
   const [loadStatus, setLoadStatus] = useState<LoadStatus>("UNKNOWN");
   const [note, setNote] = useState<string>("");
 
@@ -103,6 +105,9 @@ export default function ProductClient({ rawSku }: Props) {
   const [photoPreview, setPhotoPreview] = useState<string>("");
 
   const canSubmit = !!product;
+
+  // ✅ qty=0이면 요청 자체 불가
+  const canRequest = canSubmit && qty > 0 && !busy && !submitted;
 
   // ✅ 좌표를 "리턴" 해주는 getLocation (원클릭 전송용)
   const getLocation = async (): Promise<{ lat: number; lng: number; acc: number | null } | null> => {
@@ -156,6 +161,12 @@ export default function ProductClient({ rawSku }: Props) {
     setMsg("");
     if (!canSubmit) return;
     if (submitted) return;
+
+    // ✅ qty=0이면 막기 (버튼도 비활성화되지만 안전하게 한번 더)
+    if (!(qty > 0)) {
+      setMsg("수량이 0이면 회수요청을 할 수 없습니다.");
+      return;
+    }
 
     // ✅ 원클릭: 위치가 없으면 여기서 받아서 바로 전송에 사용
     let sendLat = lat;
@@ -215,6 +226,14 @@ export default function ProductClient({ rawSku }: Props) {
     );
   }
 
+  // ✅ 적재 상태 뱃지 색상: O=초록, X=빨강
+  const loadChip =
+    loadStatus === "O"
+      ? { bg: "#ECFFF1", fg: "#166534", text: "적재 O" }
+      : loadStatus === "X"
+      ? { bg: "#FFECEC", fg: "#B00020", text: "적재 X" }
+      : { bg: "#EEF2FF", fg: "#1F2A6B", text: "알수없음" };
+
   return (
     <div style={{ padding: 14, fontFamily: "system-ui", maxWidth: 520, margin: "0 auto" }}>
       <style jsx>{`
@@ -256,8 +275,8 @@ export default function ProductClient({ rawSku }: Props) {
           font-weight: 1000;
           font-size: 16px;
           color: #fff;
-          background: ${busy || submitted ? "#c9d3ff" : "#3b5bff"};
-          cursor: ${busy || submitted ? "not-allowed" : "pointer"};
+          background: ${canRequest ? "#3b5bff" : "#c9d3ff"};
+          cursor: ${canRequest ? "pointer" : "not-allowed"};
         }
         .chip {
           display: inline-block;
@@ -287,19 +306,42 @@ export default function ProductClient({ rawSku }: Props) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <div style={{ fontSize: 18, fontWeight: 1000 }}>{product.name}</div>
             {itemNo ? <span className="chip">{itemNo}</span> : null}
+            <span
+              style={{
+                display: "inline-block",
+                padding: "4px 10px",
+                borderRadius: 999,
+                fontSize: 12,
+                fontWeight: 1000,
+                background: loadChip.bg,
+                color: loadChip.fg,
+              }}
+              title="상태"
+            >
+              {loadChip.text}
+            </span>
           </div>
 
           <div className="section">
-            <div className="label">수량</div>
+            <div className="label">수량 (0 가능 / 0이면 요청 불가)</div>
             <input
               className="input"
               type="number"
-              min={1}
+              min={0}
               max={999}
               value={qty}
-              onChange={(e) => setQty(Math.max(1, Math.min(999, Number(e.target.value) || 1)))}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (!Number.isFinite(v)) return;
+                setQty(Math.max(0, Math.min(999, v)));
+              }}
               disabled={submitted}
             />
+            {qty === 0 ? (
+              <div style={{ marginTop: 8, fontSize: 13, color: "#b00020", fontWeight: 800 }}>
+                수량이 0이면 회수요청을 할 수 없습니다.
+              </div>
+            ) : null}
           </div>
 
           <div className="section">
@@ -386,7 +428,6 @@ export default function ProductClient({ rawSku }: Props) {
               </div>
               <button
                 onClick={() => {
-                  // 지도만 보고 싶을 때도 가능
                   getLocation();
                 }}
                 disabled={busy || submitted}
@@ -427,8 +468,8 @@ export default function ProductClient({ rawSku }: Props) {
             )}
           </div>
 
-          <button className="primary" onClick={submit} disabled={busy || submitted || !canSubmit}>
-            {submitted ? "신청완료" : busy ? "처리중..." : "회수 요청"}
+          <button className="primary" onClick={submit} disabled={!canRequest}>
+            {submitted ? "신청완료" : busy ? "처리중..." : qty === 0 ? "수량 0은 요청 불가" : "회수 요청"}
           </button>
 
           {msg ? (
