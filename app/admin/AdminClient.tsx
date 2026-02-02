@@ -19,7 +19,7 @@ type PickupRow = {
 
   address: string | null;
 
-  photo_url: string | null; // ✅ 사진 URL(없으면 null)
+  photo_url: string | null;
 };
 
 function fmtKST(ts: string) {
@@ -30,7 +30,7 @@ function fmtKST(ts: string) {
 
 function accuracyBadge(acc: number | null) {
   if (!acc || !Number.isFinite(acc)) return null;
-  const isBad = acc >= 100; // 100m 이상 빨간 배지
+  const isBad = acc >= 100;
   return (
     <span
       style={{
@@ -56,17 +56,20 @@ function makeGoogleLink(lat: number | null, lng: number | null) {
   return `https://www.google.com/maps?q=${lat},${lng}`;
 }
 
+function makeGoogleEmbedSrc(lat: number, lng: number) {
+  // 줌 16 정도가 “너가 말한 적당한 초기 거리”에 가까움
+  return `https://www.google.com/maps?q=${lat},${lng}&z=16&output=embed`;
+}
+
 export default function AdminClient() {
   const [rows, setRows] = useState<PickupRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>("");
 
-  // 검색/필터
   const [q, setQ] = useState("");
   const [skuFilter, setSkuFilter] = useState<string>("ALL");
-  const [dateFilter, setDateFilter] = useState<string>("ALL"); // YYYY-MM-DD (KST 기준)
+  const [dateFilter, setDateFilter] = useState<string>("ALL");
 
-  // 사진 모달
   const [photoModalUrl, setPhotoModalUrl] = useState<string | null>(null);
   const [photoModalTitle, setPhotoModalTitle] = useState<string>("");
 
@@ -99,12 +102,11 @@ export default function AdminClient() {
   }, [rows]);
 
   const dateOptions = useMemo(() => {
-    // KST 기준 날짜만 뽑기
     const s = new Set<string>();
     for (let i = 0; i < rows.length; i++) {
       const d = new Date(rows[i].created_at);
       if (Number.isNaN(d.getTime())) continue;
-      const kst = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }); // YYYY-MM-DD
+      const kst = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
       s.add(kst);
     }
     return ["ALL", ...Array.from(s).sort().reverse()];
@@ -132,9 +134,7 @@ export default function AdminClient() {
         const sku = (r.sku || "").toUpperCase();
         const addr = (r.address || "").toUpperCase();
         const note = (r.note || "").toUpperCase();
-
-        const hit =
-          item.includes(text) || sku.includes(text) || addr.includes(text) || note.includes(text);
+        const hit = item.includes(text) || sku.includes(text) || addr.includes(text) || note.includes(text);
         if (!hit) continue;
       }
 
@@ -186,26 +186,13 @@ export default function AdminClient() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="개별번호/제품/주소/비고 검색 (예: KDA0001, K)"
-          style={{
-            width: "100%",
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid #e5e5e5",
-            fontSize: 14,
-          }}
+          style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e5e5", fontSize: 14 }}
         />
 
         <select
           value={skuFilter}
           onChange={(e) => setSkuFilter(e.target.value)}
-          style={{
-            width: "100%",
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid #e5e5e5",
-            fontSize: 14,
-            background: "#fff",
-          }}
+          style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e5e5", fontSize: 14, background: "#fff" }}
         >
           {skuOptions.map((s) => (
             <option key={s} value={s}>
@@ -217,14 +204,7 @@ export default function AdminClient() {
         <select
           value={dateFilter}
           onChange={(e) => setDateFilter(e.target.value)}
-          style={{
-            width: "100%",
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid #e5e5e5",
-            fontSize: 14,
-            background: "#fff",
-          }}
+          style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e5e5", fontSize: 14, background: "#fff" }}
         >
           {dateOptions.map((d) => (
             <option key={d} value={d}>
@@ -236,14 +216,7 @@ export default function AdminClient() {
         <button
           onClick={() => fetchList()}
           disabled={loading}
-          style={{
-            width: "100%",
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "none",
-            fontWeight: 900,
-            cursor: loading ? "not-allowed" : "pointer",
-          }}
+          style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "none", fontWeight: 900, cursor: loading ? "not-allowed" : "pointer" }}
         >
           {loading ? "로딩..." : "새로고침"}
         </button>
@@ -262,15 +235,12 @@ export default function AdminClient() {
 
           const title = `${String(r.sku || "").toUpperCase()}${r.item_no ? ` / ${r.item_no}` : ""}`;
 
+          const hasCoord = !!(r.lat && r.lng);
+
           return (
             <div
               key={r.id}
-              style={{
-                border: "1px solid #e5e5e5",
-                borderRadius: 14,
-                padding: 12,
-                background: isHighlight ? "#fff7cc" : "#fff",
-              }}
+              style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 12, background: isHighlight ? "#fff7cc" : "#fff" }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                 <div style={{ fontWeight: 1000, fontSize: 16 }}>
@@ -281,20 +251,34 @@ export default function AdminClient() {
               </div>
 
               <div style={{ marginTop: 8, fontSize: 14, lineHeight: 1.55 }}>
-                <div>
-                  <b>주소:</b> {r.address || "주소 없음"}
-                </div>
+                <div><b>주소:</b> {r.address || "주소 없음"}</div>
                 <div>
                   <b>수량:</b> {r.qty ?? 1}
-                  {"  "}
                   <b style={{ marginLeft: 10 }}>상태:</b>{" "}
                   {r.load_status === "O" ? "적재 O" : r.load_status === "X" ? "적재 X" : "알수없음"}
                 </div>
-                {r.note ? (
-                  <div>
-                    <b>비고:</b> {r.note}
+                {r.note ? <div><b>비고:</b> {r.note}</div> : null}
+              </div>
+
+              {/* ✅ 내장 지도 (Admin에서 “지도 안보임” 해결) */}
+              <div style={{ marginTop: 10 }}>
+                {hasCoord ? (
+                  <div style={{ border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>
+                    <iframe
+                      key={`${r.lat},${r.lng}`}
+                      title={`map-${r.id}`}
+                      width="100%"
+                      height="240"
+                      style={{ border: 0, display: "block" }}
+                      src={makeGoogleEmbedSrc(r.lat as number, r.lng as number)}
+                      loading="lazy"
+                    />
                   </div>
-                ) : null}
+                ) : (
+                  <div style={{ padding: 12, borderRadius: 12, border: "1px dashed #ddd", opacity: 0.7 }}>
+                    좌표 없음
+                  </div>
+                )}
               </div>
 
               <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -302,11 +286,7 @@ export default function AdminClient() {
                   href={makeGoogleLink(r.lat, r.lng) || "#"}
                   target="_blank"
                   rel="noreferrer"
-                  style={{
-                    pointerEvents: r.lat && r.lng ? "auto" : "none",
-                    opacity: r.lat && r.lng ? 1 : 0.45,
-                    fontWeight: 900,
-                  }}
+                  style={{ pointerEvents: hasCoord ? "auto" : "none", opacity: hasCoord ? 1 : 0.45, fontWeight: 900 }}
                 >
                   구글지도 열기
                 </a>
@@ -364,27 +344,11 @@ export default function AdminClient() {
               boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-                padding: "12px 14px",
-                borderBottom: "1px solid #eee",
-              }}
-            >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px 14px", borderBottom: "1px solid #eee" }}>
               <div style={{ fontWeight: 1000 }}>{photoModalTitle}</div>
               <button
                 onClick={closePhoto}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  border: "1px solid #e5e5e5",
-                  background: "#fff",
-                  fontWeight: 900,
-                  cursor: "pointer",
-                }}
+                style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e5e5", background: "#fff", fontWeight: 900, cursor: "pointer" }}
               >
                 닫기
               </button>
