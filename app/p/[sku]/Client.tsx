@@ -7,9 +7,9 @@ type Product = { name: string; img: string };
 type LoadStatus = "O" | "X" | "UNKNOWN";
 
 const PRODUCTS: Record<string, Product> = {
-  BPS: { name: "BPS", img: "/BPS.JPG" },
-  MS108: { name: "MS108", img: "/MS108.JPG" },
-  MS112: { name: "MS112", img: "/MS112.JPG" },
+  BPS: { name: "BPS", img: "/products/BPS.JPG" },
+  MS108: { name: "MS108", img: "/products/MS108.JPG" },
+  MS112: { name: "MS112", img: "/products/MS112.JPG" },
 };
 
 type Props = {
@@ -23,7 +23,7 @@ function parseSku(rawSku: string) {
   return { sku: up.slice(0, idx), itemNo: up.slice(idx + 1) };
 }
 
-// ✅ JPG/PNG만, 긴변 1280px, JPEG 품질 0.75로 압축 (대부분 수백 KB로 떨어짐)
+// ✅ JPG/PNG만, 긴변 1280px, JPEG 품질 0.75로 압축
 async function compressImageToDataUrl(file: File): Promise<string> {
   if (!/^image\/(jpeg|png)$/.test(file.type)) {
     throw new Error("JPG/PNG만 업로드 가능합니다.");
@@ -59,7 +59,7 @@ async function compressImageToDataUrl(file: File): Promise<string> {
 
     ctx.drawImage(img, 0, 0, nw, nh);
 
-    // PNG도 용량 줄이려고 JPEG로 통일 (투명 필요하면 png로 바꿔도 됨)
+    // PNG도 용량 줄이려고 JPEG로 통일
     let out = canvas.toDataURL("image/jpeg", 0.75);
 
     // 너무 크면 한번 더 낮춤
@@ -84,6 +84,9 @@ export default function ProductClient({ rawSku }: Props) {
 
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+
+  // ✅ 요청 성공 후 현재 화면에서만 비활성화
+  const [submitted, setSubmitted] = useState(false);
 
   const [lat, setLat] = useState<number | null>(null);
   const [lng, setLng] = useState<number | null>(null);
@@ -142,7 +145,9 @@ export default function ProductClient({ rawSku }: Props) {
   const submit = async () => {
     setMsg("");
     if (!canSubmit) return;
+    if (submitted) return;
 
+    // 위치 없으면 먼저 가져오기
     if (!lat || !lng) {
       await getLocation();
       if (!lat || !lng) return;
@@ -174,6 +179,7 @@ export default function ProductClient({ rawSku }: Props) {
       const json = await res.json();
       if (typeof json?.address === "string") setAddress(json.address);
 
+      setSubmitted(true); // ✅ 성공하면 현재 화면에서만 비활성화
       setMsg("✅ 신청 완료");
       setTimeout(() => setMsg(""), 2500);
     } catch (e: any) {
@@ -212,7 +218,8 @@ export default function ProductClient({ rawSku }: Props) {
           font-weight: 900;
           margin-bottom: 8px;
         }
-        .input, .textarea {
+        .input,
+        .textarea {
           width: 100%;
           border: 1px solid #e5e5e5;
           border-radius: 12px;
@@ -232,8 +239,8 @@ export default function ProductClient({ rawSku }: Props) {
           font-weight: 1000;
           font-size: 16px;
           color: #fff;
-          background: ${busy ? "#c9d3ff" : "#3b5bff"};
-          cursor: ${busy ? "not-allowed" : "pointer"};
+          background: ${busy || submitted ? "#c9d3ff" : "#3b5bff"};
+          cursor: ${busy || submitted ? "not-allowed" : "pointer"};
         }
         .chip {
           display: inline-block;
@@ -248,7 +255,16 @@ export default function ProductClient({ rawSku }: Props) {
 
       <div className="card">
         <div style={{ position: "relative", width: "100%", height: 260, background: "#f6f7f9" }}>
-          <Image src={product.img} alt={product.name} fill style={{ objectFit: "contain" }} />
+          <Image
+            src={product.img}
+            alt={product.name}
+            fill
+            style={{ objectFit: "contain" }}
+            // ✅ 이미지가 진짜 404일 때 화면이 빈칸처럼 보이니까 메시지로 바로 감지
+            onError={() => {
+              setMsg("제품 이미지가 없습니다. public/products 경로 및 파일명을 확인하세요.");
+            }}
+          />
         </div>
 
         <div style={{ padding: 14, display: "grid", gap: 10 }}>
@@ -266,6 +282,7 @@ export default function ProductClient({ rawSku }: Props) {
               max={999}
               value={qty}
               onChange={(e) => setQty(Math.max(1, Math.min(999, Number(e.target.value) || 1)))}
+              disabled={submitted}
             />
           </div>
 
@@ -273,11 +290,23 @@ export default function ProductClient({ rawSku }: Props) {
             <div className="label">상태 확인</div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <input type="radio" name="load" checked={loadStatus === "O"} onChange={() => setLoadStatus("O")} />
+                <input
+                  type="radio"
+                  name="load"
+                  checked={loadStatus === "O"}
+                  onChange={() => setLoadStatus("O")}
+                  disabled={submitted}
+                />
                 적재 O
               </label>
               <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <input type="radio" name="load" checked={loadStatus === "X"} onChange={() => setLoadStatus("X")} />
+                <input
+                  type="radio"
+                  name="load"
+                  checked={loadStatus === "X"}
+                  onChange={() => setLoadStatus("X")}
+                  disabled={submitted}
+                />
                 적재 X
               </label>
               <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -286,6 +315,7 @@ export default function ProductClient({ rawSku }: Props) {
                   name="load"
                   checked={loadStatus === "UNKNOWN"}
                   onChange={() => setLoadStatus("UNKNOWN")}
+                  disabled={submitted}
                 />
                 알수없음
               </label>
@@ -299,6 +329,7 @@ export default function ProductClient({ rawSku }: Props) {
               value={note}
               onChange={(e) => setNote(e.target.value.slice(0, 100))}
               placeholder="최대 100글자 / 특이사항 및 연락처 등 입력"
+              disabled={submitted}
             />
             <div style={{ textAlign: "right", opacity: 0.6, fontSize: 12 }}>{note.length}/100</div>
           </div>
@@ -306,8 +337,13 @@ export default function ProductClient({ rawSku }: Props) {
           <div className="section">
             <div className="label">사진 첨부(선택)</div>
 
-            {/* ✅ capture 속성 없음 => 갤러리/카메라 선택은 기기 기본 UI */}
-            <input type="file" accept="image/jpeg,image/png" onChange={(e) => onPickPhoto(e.target.files?.[0] || null)} />
+            {/* ✅ capture 없음: 갤러리/카메라 선택은 기기 기본 UI */}
+            <input
+              type="file"
+              accept="image/jpeg,image/png"
+              onChange={(e) => onPickPhoto(e.target.files?.[0] || null)}
+              disabled={submitted}
+            />
 
             {photoPreview ? (
               <div style={{ marginTop: 10, borderRadius: 12, overflow: "hidden", border: "1px solid #eee" }}>
@@ -330,17 +366,19 @@ export default function ProductClient({ rawSku }: Props) {
 
           <div className="section">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-              <div className="label" style={{ marginBottom: 0 }}>위치</div>
+              <div className="label" style={{ marginBottom: 0 }}>
+                위치
+              </div>
               <button
                 onClick={getLocation}
-                disabled={busy}
+                disabled={busy || submitted}
                 style={{
                   padding: "8px 10px",
                   borderRadius: 12,
                   border: "1px solid #e5e5e5",
                   background: "#fff",
                   fontWeight: 900,
-                  cursor: busy ? "not-allowed" : "pointer",
+                  cursor: busy || submitted ? "not-allowed" : "pointer",
                 }}
               >
                 위치 가져오기
@@ -350,9 +388,18 @@ export default function ProductClient({ rawSku }: Props) {
             {lat && lng ? (
               <>
                 <div style={{ marginTop: 10, border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>
-                  <iframe title="map" src={makeEmbedMap(lat, lng)} width="100%" height="220" style={{ border: 0, display: "block" }} loading="lazy" />
+                  <iframe
+                    title="map"
+                    src={makeEmbedMap(lat, lng)}
+                    width="100%"
+                    height="220"
+                    style={{ border: 0, display: "block" }}
+                    loading="lazy"
+                  />
                 </div>
-                <div style={{ marginTop: 10, fontSize: 13, opacity: 0.8 }}>정확도: {acc ? `${Math.round(acc)}m` : "-"}</div>
+                <div style={{ marginTop: 10, fontSize: 13, opacity: 0.8 }}>
+                  정확도: {acc ? `${Math.round(acc)}m` : "-"}
+                </div>
                 <div style={{ marginTop: 6, fontSize: 14 }}>
                   <b>주소:</b> {address ? address : "신청 후 자동 표시됩니다"}
                 </div>
@@ -362,8 +409,8 @@ export default function ProductClient({ rawSku }: Props) {
             )}
           </div>
 
-          <button className="primary" onClick={submit} disabled={busy || !canSubmit}>
-            회수 요청
+          <button className="primary" onClick={submit} disabled={busy || submitted || !canSubmit}>
+            {submitted ? "신청완료" : "회수 요청"}
           </button>
 
           {msg ? (
