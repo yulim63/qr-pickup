@@ -417,4 +417,7 @@ export default function AdminClient() {
     </div>
   </div>
 )}
+</div>
+  );
+}
 
