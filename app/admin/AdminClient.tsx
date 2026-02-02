@@ -30,7 +30,7 @@ function fmtKST(ts: string) {
 
 function accuracyBadge(acc: number | null) {
   if (!acc || !Number.isFinite(acc)) return null;
-  const isBad = acc >= 100; // 100m 이상 빨간 배지
+  const isBad = acc >= 100;
   return (
     <span
       style={{
@@ -60,10 +60,10 @@ function makeGoogleEmbedSrc(lat: number, lng: number) {
   return `https://www.google.com/maps?q=${lat},${lng}&z=16&output=embed`;
 }
 
-// ✅ 상태 뱃지: O=초록 / X=빨강
+// ✅ 요구대로: 적재 X = 초록, 적재 O = 빨강
 function loadStatusChip(s: LoadStatus | null) {
-  if (s === "O") return { text: "적재 O", bg: "#ecfff1", fg: "#166534" }; // green
-  if (s === "X") return { text: "적재 X", bg: "#ffecec", fg: "#b00020" }; // red
+  if (s === "X") return { text: "적재 X", bg: "#ecfff1", fg: "#166534" }; // green
+  if (s === "O") return { text: "적재 O", bg: "#ffecec", fg: "#b00020" }; // red
   return { text: "알수없음", bg: "#eef2ff", fg: "#1f2a6b" };
 }
 
@@ -72,12 +72,10 @@ export default function AdminClient() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>("");
 
-  // 검색/필터
   const [q, setQ] = useState("");
   const [skuFilter, setSkuFilter] = useState<string>("ALL");
-  const [dateFilter, setDateFilter] = useState<string>("ALL"); // YYYY-MM-DD (KST 기준)
+  const [dateFilter, setDateFilter] = useState<string>("ALL");
 
-  // 사진 모달
   const [photoModalUrl, setPhotoModalUrl] = useState<string | null>(null);
   const [photoModalTitle, setPhotoModalTitle] = useState<string>("");
 
@@ -114,7 +112,7 @@ export default function AdminClient() {
     for (let i = 0; i < rows.length; i++) {
       const d = new Date(rows[i].created_at);
       if (Number.isNaN(d.getTime())) continue;
-      const kst = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }); // YYYY-MM-DD
+      const kst = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
       s.add(kst);
     }
     return ["ALL", ...Array.from(s).sort().reverse()];
@@ -142,7 +140,6 @@ export default function AdminClient() {
         const sku = (r.sku || "").toUpperCase();
         const addr = (r.address || "").toUpperCase();
         const note = (r.note || "").toUpperCase();
-
         const hit = item.includes(text) || sku.includes(text) || addr.includes(text) || note.includes(text);
         if (!hit) continue;
       }
@@ -321,12 +318,7 @@ export default function AdminClient() {
           ))}
         </select>
 
-        <button
-          className="btn refresh"
-          onClick={fetchList}
-          disabled={loading}
-          style={{ cursor: loading ? "not-allowed" : "pointer" }}
-        >
+        <button className="btn refresh" onClick={fetchList} disabled={loading} style={{ cursor: loading ? "not-allowed" : "pointer" }}>
           {loading ? "로딩..." : "새로고침"}
         </button>
       </div>
@@ -353,7 +345,6 @@ export default function AdminClient() {
                 <div style={{ fontWeight: 1000, fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}>
                   <span>{title}</span>
 
-                  {/* ✅ 상태 뱃지 */}
                   <span
                     style={{
                       display: "inline-block",
@@ -404,10 +395,7 @@ export default function AdminClient() {
                   className="actionBtn"
                   onClick={() => r.photo_url && openPhoto(r.photo_url, title)}
                   disabled={!r.photo_url}
-                  style={{
-                    cursor: r.photo_url ? "pointer" : "not-allowed",
-                    opacity: r.photo_url ? 1 : 0.45,
-                  }}
+                  style={{ cursor: r.photo_url ? "pointer" : "not-allowed", opacity: r.photo_url ? 1 : 0.45 }}
                   title={r.photo_url ? "사진 보기" : "사진 없음"}
                 >
                   {r.photo_url ? "사진보기" : "사진없음"}
@@ -426,9 +414,7 @@ export default function AdminClient() {
                     />
                   </div>
                 ) : (
-                  <div style={{ padding: 12, borderRadius: 12, border: "1px dashed #ddd", opacity: 0.7 }}>
-                    좌표 없음
-                  </div>
+                  <div style={{ padding: 12, borderRadius: 12, border: "1px dashed #ddd", opacity: 0.7 }}>좌표 없음</div>
                 )}
               </div>
             </div>

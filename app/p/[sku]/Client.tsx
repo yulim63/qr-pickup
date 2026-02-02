@@ -23,7 +23,6 @@ function parseSku(rawSku: string) {
   return { sku: up.slice(0, idx), itemNo: up.slice(idx + 1) };
 }
 
-// ✅ JPG/PNG만, 긴변 1280px, JPEG 품질 0.75로 압축
 async function compressImageToDataUrl(file: File): Promise<string> {
   if (!/^image\/(jpeg|png)$/.test(file.type)) {
     throw new Error("JPG/PNG만 업로드 가능합니다.");
@@ -60,10 +59,8 @@ async function compressImageToDataUrl(file: File): Promise<string> {
 
     ctx.drawImage(img, 0, 0, nw, nh);
 
-    // PNG도 용량 줄이려고 JPEG로 통일
     let out = canvas.toDataURL("image/jpeg", 0.75);
 
-    // 너무 크면 한번 더 낮춤
     const approxBytes = Math.floor((out.length * 3) / 4);
     if (approxBytes > 2.2 * 1024 * 1024) {
       out = canvas.toDataURL("image/jpeg", 0.6);
@@ -86,7 +83,6 @@ export default function ProductClient({ rawSku }: Props) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
-  // ✅ 요청 성공 후 현재 화면에서만 비활성화
   const [submitted, setSubmitted] = useState(false);
 
   const [lat, setLat] = useState<number | null>(null);
@@ -95,7 +91,6 @@ export default function ProductClient({ rawSku }: Props) {
 
   const [address, setAddress] = useState<string>("");
 
-  // ✅ 수량 0 가능
   const [qty, setQty] = useState<number>(1);
 
   const [loadStatus, setLoadStatus] = useState<LoadStatus>("UNKNOWN");
@@ -105,11 +100,8 @@ export default function ProductClient({ rawSku }: Props) {
   const [photoPreview, setPhotoPreview] = useState<string>("");
 
   const canSubmit = !!product;
-
-  // ✅ qty=0이면 요청 자체 불가
   const canRequest = canSubmit && qty > 0 && !busy && !submitted;
 
-  // ✅ 좌표를 "리턴" 해주는 getLocation (원클릭 전송용)
   const getLocation = async (): Promise<{ lat: number; lng: number; acc: number | null } | null> => {
     setMsg("");
     if (!navigator.geolocation) {
@@ -131,7 +123,6 @@ export default function ProductClient({ rawSku }: Props) {
       const nextLng = pos.coords.longitude;
       const nextAcc = pos.coords.accuracy ?? null;
 
-      // 지도 표시용 state 업데이트
       setLat(nextLat);
       setLng(nextLng);
       setAcc(nextAcc);
@@ -162,13 +153,11 @@ export default function ProductClient({ rawSku }: Props) {
     if (!canSubmit) return;
     if (submitted) return;
 
-    // ✅ qty=0이면 막기 (버튼도 비활성화되지만 안전하게 한번 더)
     if (!(qty > 0)) {
       setMsg("수량이 0이면 회수요청을 할 수 없습니다.");
       return;
     }
 
-    // ✅ 원클릭: 위치가 없으면 여기서 받아서 바로 전송에 사용
     let sendLat = lat;
     let sendLng = lng;
     let sendAcc = acc;
@@ -226,12 +215,12 @@ export default function ProductClient({ rawSku }: Props) {
     );
   }
 
-  // ✅ 적재 상태 뱃지 색상: O=초록, X=빨강
+  // ✅ 요청대로: 적재 X = 초록, 적재 O = 빨강
   const loadChip =
-    loadStatus === "O"
-      ? { bg: "#ECFFF1", fg: "#166534", text: "적재 O" }
-      : loadStatus === "X"
-      ? { bg: "#FFECEC", fg: "#B00020", text: "적재 X" }
+    loadStatus === "X"
+      ? { bg: "#ECFFF1", fg: "#166534", text: "적재 X" } // green
+      : loadStatus === "O"
+      ? { bg: "#FFECEC", fg: "#B00020", text: "적재 O" } // red
       : { bg: "#EEF2FF", fg: "#1F2A6B", text: "알수없음" };
 
   return (
@@ -394,7 +383,6 @@ export default function ProductClient({ rawSku }: Props) {
 
           <div className="section">
             <div className="label">사진 첨부(선택)</div>
-            {/* ✅ capture 속성 없음 -> 기기 기본 UI에서 카메라/갤러리 선택 */}
             <input
               type="file"
               accept="image/jpeg,image/png"
@@ -427,9 +415,7 @@ export default function ProductClient({ rawSku }: Props) {
                 위치
               </div>
               <button
-                onClick={() => {
-                  getLocation();
-                }}
+                onClick={() => getLocation()}
                 disabled={busy || submitted}
                 style={{
                   padding: "8px 10px",
