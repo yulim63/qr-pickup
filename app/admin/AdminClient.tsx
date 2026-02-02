@@ -269,26 +269,43 @@ export default function AdminClient() {
           }
         }
 
+        /* ✅ 액션 바: 사진보기는 맨 오른쪽으로 */
         .actions {
           display: flex;
           gap: 8px;
-          flex-wrap: wrap;
+          align-items: center;
           margin-top: 10px;
           margin-bottom: 10px;
         }
 
         .actionBtn {
-          padding: 8px 10px;
+          padding: 9px 12px;
           border-radius: 10px;
           border: 1px solid #e5e5e5;
           background: #fff;
-          font-weight: 900;
+          font-weight: 1000;
           cursor: pointer;
+          line-height: 1;
+          text-decoration: none;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          white-space: nowrap;
         }
 
-        .link {
-          font-weight: 900;
-          text-decoration: none;
+        .actionBtn:active {
+          transform: translateY(1px);
+        }
+
+        .disabled {
+          opacity: 0.45;
+          cursor: not-allowed !important;
+          pointer-events: none;
+        }
+
+        /* ✅ 사진보기 버튼을 오른쪽 끝으로 보내기 */
+        .photoRight {
+          margin-left: auto;
         }
       `}</style>
 
@@ -336,8 +353,11 @@ export default function AdminClient() {
 
           const title = `${String(r.sku || "").toUpperCase()}${r.item_no ? ` / ${r.item_no}` : ""}`;
           const hasCoord = !!(r.lat && r.lng);
+          const hasPhoto = !!r.photo_url;
 
           const st = loadStatusChip(r.load_status);
+
+          const gLink = makeGoogleLink(r.lat, r.lng);
 
           return (
             <div key={r.id} className="card" style={{ background: isHighlight ? "#fff7cc" : "#fff" }}>
@@ -380,25 +400,25 @@ export default function AdminClient() {
                 ) : null}
               </div>
 
+              {/* ✅ 버튼 영역: 지도 버튼(왼쪽), 사진보기(맨 오른쪽) */}
               <div className="actions">
                 <a
-                  className="link"
-                  href={makeGoogleLink(r.lat, r.lng) || "#"}
+                  className={`actionBtn ${hasCoord ? "" : "disabled"}`}
+                  href={hasCoord ? gLink : "#"}
                   target="_blank"
                   rel="noreferrer"
-                  style={{ pointerEvents: hasCoord ? "auto" : "none", opacity: hasCoord ? 1 : 0.45 }}
+                  title={hasCoord ? "구글지도 열기" : "좌표 없음"}
                 >
                   구글지도 열기
                 </a>
 
                 <button
-                  className="actionBtn"
-                  onClick={() => r.photo_url && openPhoto(r.photo_url, title)}
-                  disabled={!r.photo_url}
-                  style={{ cursor: r.photo_url ? "pointer" : "not-allowed", opacity: r.photo_url ? 1 : 0.45 }}
-                  title={r.photo_url ? "사진 보기" : "사진 없음"}
+                  className={`actionBtn photoRight ${hasPhoto ? "" : "disabled"}`}
+                  onClick={() => hasPhoto && openPhoto(r.photo_url as string, title)}
+                  disabled={!hasPhoto}
+                  title={hasPhoto ? "사진 보기" : "사진 없음"}
                 >
-                  {r.photo_url ? "사진보기" : "사진없음"}
+                  {hasPhoto ? "사진보기" : "사진없음"}
                 </button>
               </div>
 
@@ -428,6 +448,7 @@ export default function AdminClient() {
         )}
       </div>
 
+      {/* 사진 모달 */}
       {photoModalUrl && (
         <div
           onClick={closePhoto}
