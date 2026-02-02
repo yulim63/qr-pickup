@@ -312,7 +312,7 @@ export default function ProductClient({ rawSku }: Props) {
           </div>
 
           <div className="section">
-            <div className="label">수량 (0 가능 / 0이면 요청 불가)</div>
+            <div className="label">수량 ( 0이면 요청 불가)</div>
             <input
               className="input"
               type="number"
