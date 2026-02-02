@@ -30,7 +30,7 @@ function fmtKST(ts: string) {
 
 function accuracyBadge(acc: number | null) {
   if (!acc || !Number.isFinite(acc)) return null;
-  const isBad = acc >= 100;
+  const isBad = acc >= 100; // 100m 이상 빨간 배지
   return (
     <span
       style={{
@@ -57,7 +57,6 @@ function makeGoogleLink(lat: number | null, lng: number | null) {
 }
 
 function makeGoogleEmbedSrc(lat: number, lng: number) {
-  // 줌 16 정도가 “너가 말한 적당한 초기 거리”에 가까움
   return `https://www.google.com/maps?q=${lat},${lng}&z=16&output=embed`;
 }
 
@@ -66,10 +65,12 @@ export default function AdminClient() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>("");
 
+  // 검색/필터
   const [q, setQ] = useState("");
   const [skuFilter, setSkuFilter] = useState<string>("ALL");
-  const [dateFilter, setDateFilter] = useState<string>("ALL");
+  const [dateFilter, setDateFilter] = useState<string>("ALL"); // YYYY-MM-DD (KST 기준)
 
+  // 사진 모달
   const [photoModalUrl, setPhotoModalUrl] = useState<string | null>(null);
   const [photoModalTitle, setPhotoModalTitle] = useState<string>("");
 
@@ -106,7 +107,7 @@ export default function AdminClient() {
     for (let i = 0; i < rows.length; i++) {
       const d = new Date(rows[i].created_at);
       if (Number.isNaN(d.getTime())) continue;
-      const kst = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+      const kst = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }); // YYYY-MM-DD
       s.add(kst);
     }
     return ["ALL", ...Array.from(s).sort().reverse()];
@@ -134,7 +135,9 @@ export default function AdminClient() {
         const sku = (r.sku || "").toUpperCase();
         const addr = (r.address || "").toUpperCase();
         const note = (r.note || "").toUpperCase();
-        const hit = item.includes(text) || sku.includes(text) || addr.includes(text) || note.includes(text);
+
+        const hit =
+          item.includes(text) || sku.includes(text) || addr.includes(text) || note.includes(text);
         if (!hit) continue;
       }
 
@@ -170,30 +173,136 @@ export default function AdminClient() {
   };
 
   return (
-    <div style={{ padding: 16, fontFamily: "system-ui", maxWidth: 980, margin: "0 auto" }}>
+    <div className="adminWrap">
+      <style jsx>{`
+        .adminWrap {
+          width: 100%;
+          max-width: 980px;
+          margin: 0 auto;
+          padding: 16px;
+          font-family: system-ui;
+          box-sizing: border-box;
+        }
+
+        /* ✅ 상단 검색/필터/버튼: 기본(데스크톱) */
+        .toolbar {
+          display: grid;
+          grid-template-columns: 1fr 180px 180px 120px;
+          gap: 10px;
+          align-items: center;
+          margin-bottom: 12px;
+        }
+
+        /* ✅ 태블릿 이하: 2열 */
+        @media (max-width: 900px) {
+          .adminWrap {
+            max-width: 100%;
+            padding: 12px;
+          }
+          .toolbar {
+            grid-template-columns: 1fr 1fr;
+          }
+          .toolbar .search {
+            grid-column: 1 / -1; /* 검색은 한 줄 전체 */
+          }
+          .toolbar .refresh {
+            grid-column: 1 / -1; /* 새로고침도 한 줄 전체 */
+          }
+        }
+
+        /* ✅ 모바일: 1열(꼬임/오버플로우 방지) */
+        @media (max-width: 520px) {
+          .toolbar {
+            grid-template-columns: 1fr;
+          }
+          .toolbar .search,
+          .toolbar .sku,
+          .toolbar .date,
+          .toolbar .refresh {
+            grid-column: auto;
+          }
+        }
+
+        .input,
+        .select {
+          width: 100%;
+          padding: 10px 12px;
+          border-radius: 10px;
+          border: 1px solid #e5e5e5;
+          font-size: 14px;
+          background: #fff;
+          box-sizing: border-box;
+        }
+
+        .btn {
+          width: 100%;
+          padding: 10px 12px;
+          border-radius: 10px;
+          border: none;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .card {
+          border: 1px solid #e5e5e5;
+          border-radius: 14px;
+          padding: 12px;
+          background: #fff;
+        }
+
+        .mapBox {
+          border: 1px solid #e5e5e5;
+          border-radius: 12px;
+          overflow: hidden;
+        }
+
+        .mapFrame {
+          border: 0;
+          display: block;
+          width: 100%;
+          height: 240px;
+        }
+
+        @media (max-width: 520px) {
+          .mapFrame {
+            height: 220px;
+          }
+        }
+
+        .actions {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-top: 10px;
+          margin-bottom: 10px; /* ✅ 지도 위에 버튼이 오게 여유 */
+        }
+
+        .actionBtn {
+          padding: 8px 10px;
+          border-radius: 10px;
+          border: 1px solid #e5e5e5;
+          background: #fff;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .link {
+          font-weight: 900;
+          text-decoration: none;
+        }
+      `}</style>
+
       <h1 style={{ fontSize: 22, marginBottom: 10 }}>회수 요청 목록</h1>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 160px 160px 120px",
-          gap: 10,
-          alignItems: "center",
-          marginBottom: 12,
-        }}
-      >
+      <div className="toolbar">
         <input
+          className="input search"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="개별번호/제품/주소/비고 검색 (예: KDA0001, K)"
-          style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e5e5", fontSize: 14 }}
         />
 
-        <select
-          value={skuFilter}
-          onChange={(e) => setSkuFilter(e.target.value)}
-          style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e5e5", fontSize: 14, background: "#fff" }}
-        >
+        <select className="select sku" value={skuFilter} onChange={(e) => setSkuFilter(e.target.value)}>
           {skuOptions.map((s) => (
             <option key={s} value={s}>
               {s === "ALL" ? "제품 전체" : s}
@@ -201,11 +310,7 @@ export default function AdminClient() {
           ))}
         </select>
 
-        <select
-          value={dateFilter}
-          onChange={(e) => setDateFilter(e.target.value)}
-          style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e5e5", fontSize: 14, background: "#fff" }}
-        >
+        <select className="select date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}>
           {dateOptions.map((d) => (
             <option key={d} value={d}>
               {d === "ALL" ? "날짜 전체" : d}
@@ -213,11 +318,7 @@ export default function AdminClient() {
           ))}
         </select>
 
-        <button
-          onClick={() => fetchList()}
-          disabled={loading}
-          style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "none", fontWeight: 900, cursor: loading ? "not-allowed" : "pointer" }}
-        >
+        <button className="btn refresh" onClick={fetchList} disabled={loading} style={{ cursor: loading ? "not-allowed" : "pointer" }}>
           {loading ? "로딩..." : "새로고침"}
         </button>
       </div>
@@ -234,14 +335,10 @@ export default function AdminClient() {
           const isHighlight = exactMatchItem && item && item === exactMatchItem;
 
           const title = `${String(r.sku || "").toUpperCase()}${r.item_no ? ` / ${r.item_no}` : ""}`;
-
           const hasCoord = !!(r.lat && r.lng);
 
           return (
-            <div
-              key={r.id}
-              style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 12, background: isHighlight ? "#fff7cc" : "#fff" }}
-            >
+            <div key={r.id} className="card" style={{ background: isHighlight ? "#fff7cc" : "#fff" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                 <div style={{ fontWeight: 1000, fontSize: 16 }}>
                   {title}
@@ -260,16 +357,40 @@ export default function AdminClient() {
                 {r.note ? <div><b>비고:</b> {r.note}</div> : null}
               </div>
 
-              {/* ✅ 내장 지도 (Admin에서 “지도 안보임” 해결) */}
-              <div style={{ marginTop: 10 }}>
+              {/* ✅ 버튼을 지도 위로 이동 */}
+              <div className="actions">
+                <a
+                  className="link"
+                  href={makeGoogleLink(r.lat, r.lng) || "#"}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ pointerEvents: hasCoord ? "auto" : "none", opacity: hasCoord ? 1 : 0.45 }}
+                >
+                  구글지도 열기
+                </a>
+
+                <button
+                  className="actionBtn"
+                  onClick={() => r.photo_url && openPhoto(r.photo_url, title)}
+                  disabled={!r.photo_url}
+                  style={{
+                    cursor: r.photo_url ? "pointer" : "not-allowed",
+                    opacity: r.photo_url ? 1 : 0.45,
+                  }}
+                  title={r.photo_url ? "사진 보기" : "사진 없음"}
+                >
+                  {r.photo_url ? "사진보기" : "사진없음"}
+                </button>
+              </div>
+
+              {/* ✅ 내장 지도 */}
+              <div>
                 {hasCoord ? (
-                  <div style={{ border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>
+                  <div className="mapBox">
                     <iframe
                       key={`${r.lat},${r.lng}`}
                       title={`map-${r.id}`}
-                      width="100%"
-                      height="240"
-                      style={{ border: 0, display: "block" }}
+                      className="mapFrame"
                       src={makeGoogleEmbedSrc(r.lat as number, r.lng as number)}
                       loading="lazy"
                     />
@@ -279,34 +400,6 @@ export default function AdminClient() {
                     좌표 없음
                   </div>
                 )}
-              </div>
-
-              <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <a
-                  href={makeGoogleLink(r.lat, r.lng) || "#"}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ pointerEvents: hasCoord ? "auto" : "none", opacity: hasCoord ? 1 : 0.45, fontWeight: 900 }}
-                >
-                  구글지도 열기
-                </a>
-
-                <button
-                  onClick={() => r.photo_url && openPhoto(r.photo_url, title)}
-                  disabled={!r.photo_url}
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    border: "1px solid #e5e5e5",
-                    background: "#fff",
-                    fontWeight: 900,
-                    cursor: r.photo_url ? "pointer" : "not-allowed",
-                    opacity: r.photo_url ? 1 : 0.45,
-                  }}
-                  title={r.photo_url ? "사진 보기" : "사진 없음"}
-                >
-                  {r.photo_url ? "사진보기" : "사진없음"}
-                </button>
               </div>
             </div>
           );
@@ -319,105 +412,95 @@ export default function AdminClient() {
         )}
       </div>
 
-      {/* ✅ 사진 모달 */}
-      {/* ✅ 사진 모달 (부모/화면 넘어가지 않게 크기 제한) */}
-{photoModalUrl && (
-  <div
-    onClick={closePhoto}
-    style={{
-      position: "fixed",
-      inset: 0,
-      background: "rgba(0,0,0,0.55)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: 14,
-      zIndex: 9999,
-    }}
-  >
-    <div
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        width: "min(920px, calc(100vw - 28px))",   // ✅ 화면 폭 넘지 않게
-        maxHeight: "calc(100vh - 28px)",          // ✅ 화면 높이 넘지 않게
-        background: "#fff",
-        borderRadius: 16,
-        overflow: "hidden",
-        boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
-        display: "flex",
-        flexDirection: "column",                  // ✅ 헤더+본문 분리
-      }}
-    >
-      {/* 헤더 */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 10,
-          padding: "12px 14px",
-          borderBottom: "1px solid #eee",
-          flex: "0 0 auto",
-        }}
-      >
-        <div style={{ fontWeight: 1000, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {photoModalTitle}
-        </div>
-        <button
+      {/* ✅ 사진 모달 (현재 완벽하다고 한 버전 유지) */}
+      {photoModalUrl && (
+        <div
           onClick={closePhoto}
           style={{
-            padding: "8px 10px",
-            borderRadius: 10,
-            border: "1px solid #e5e5e5",
-            background: "#fff",
-            fontWeight: 900,
-            cursor: "pointer",
-            flex: "0 0 auto",
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 14,
+            zIndex: 9999,
           }}
         >
-          닫기
-        </button>
-      </div>
-
-      {/* 본문(스크롤 가능) */}
-      <div
-        style={{
-          padding: 14,
-          overflow: "auto",                        // ✅ 넘치면 스크롤
-          flex: "1 1 auto",
-        }}
-      >
-        <div
-          style={{
-            width: "100%",
-            background: "#fafafa",
-            borderRadius: 12,
-            border: "1px solid #eee",
-            overflow: "hidden",
-          }}
-        >
-          <img
-            src={photoModalUrl}
-            alt="photo"
+          <div
+            onClick={(e) => e.stopPropagation()}
             style={{
-              width: "100%",
-              maxHeight: "70vh",                   // ✅ 이미지도 과하게 커지지 않게
-              objectFit: "contain",
-              display: "block",
+              width: "min(920px, calc(100vw - 28px))",
+              maxHeight: "calc(100vh - 28px)",
+              background: "#fff",
+              borderRadius: 16,
+              overflow: "hidden",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+              display: "flex",
+              flexDirection: "column",
             }}
-          />
-        </div>
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                padding: "12px 14px",
+                borderBottom: "1px solid #eee",
+                flex: "0 0 auto",
+              }}
+            >
+              <div style={{ fontWeight: 1000, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {photoModalTitle}
+              </div>
+              <button
+                onClick={closePhoto}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #e5e5e5",
+                  background: "#fff",
+                  fontWeight: 900,
+                  cursor: "pointer",
+                  flex: "0 0 auto",
+                }}
+              >
+                닫기
+              </button>
+            </div>
 
-        <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
-          <a href={photoModalUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 900 }}>
-            원본 새창
-          </a>
+            <div style={{ padding: 14, overflow: "auto", flex: "1 1 auto" }}>
+              <div
+                style={{
+                  width: "100%",
+                  background: "#fafafa",
+                  borderRadius: 12,
+                  border: "1px solid #eee",
+                  overflow: "hidden",
+                }}
+              >
+                <img
+                  src={photoModalUrl}
+                  alt="photo"
+                  style={{
+                    width: "100%",
+                    maxHeight: "70vh",
+                    objectFit: "contain",
+                    display: "block",
+                  }}
+                />
+              </div>
+
+              <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+                <a href={photoModalUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 900 }}>
+                  원본 새창
+                </a>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
-  </div>
-)}
-</div>
   );
 }
-
