@@ -54,6 +54,7 @@ async function compressImageToDataUrl(file: File): Promise<string> {
     const canvas = document.createElement("canvas");
     canvas.width = nw;
     canvas.height = nh;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("canvas error");
 
@@ -103,11 +104,12 @@ export default function ProductClient({ rawSku }: Props) {
 
   const canSubmit = !!product;
 
-  const getLocation = async () => {
+  // ✅ 좌표를 "리턴" 해주는 getLocation (원클릭 전송용)
+  const getLocation = async (): Promise<{ lat: number; lng: number; acc: number | null } | null> => {
     setMsg("");
     if (!navigator.geolocation) {
       setMsg("이 기기는 위치 기능을 지원하지 않습니다.");
-      return;
+      return null;
     }
 
     setBusy(true);
@@ -120,11 +122,19 @@ export default function ProductClient({ rawSku }: Props) {
         });
       });
 
-      setLat(pos.coords.latitude);
-      setLng(pos.coords.longitude);
-      setAcc(pos.coords.accuracy ?? null);
+      const nextLat = pos.coords.latitude;
+      const nextLng = pos.coords.longitude;
+      const nextAcc = pos.coords.accuracy ?? null;
+
+      // 지도 표시용 state 업데이트
+      setLat(nextLat);
+      setLng(nextLng);
+      setAcc(nextAcc);
+
+      return { lat: nextLat, lng: nextLng, acc: nextAcc };
     } catch {
       setMsg("위치권한이 거부되었습니다. 브라우저 설정에서 위치권한을 허용해주세요.");
+      return null;
     } finally {
       setBusy(false);
     }
@@ -147,10 +157,17 @@ export default function ProductClient({ rawSku }: Props) {
     if (!canSubmit) return;
     if (submitted) return;
 
-    // 위치 없으면 먼저 가져오기
-    if (!lat || !lng) {
-      await getLocation();
-      if (!lat || !lng) return;
+    // ✅ 원클릭: 위치가 없으면 여기서 받아서 바로 전송에 사용
+    let sendLat = lat;
+    let sendLng = lng;
+    let sendAcc = acc;
+
+    if (!sendLat || !sendLng) {
+      const got = await getLocation();
+      if (!got) return;
+      sendLat = got.lat;
+      sendLng = got.lng;
+      sendAcc = got.acc;
     }
 
     setBusy(true);
@@ -164,9 +181,9 @@ export default function ProductClient({ rawSku }: Props) {
           qty,
           loadStatus,
           note,
-          lat,
-          lng,
-          accuracy: acc,
+          lat: sendLat,
+          lng: sendLng,
+          accuracy: sendAcc,
           photoDataUrl: photoDataUrl || null,
         }),
       });
@@ -179,7 +196,7 @@ export default function ProductClient({ rawSku }: Props) {
       const json = await res.json();
       if (typeof json?.address === "string") setAddress(json.address);
 
-      setSubmitted(true); // ✅ 성공하면 현재 화면에서만 비활성화
+      setSubmitted(true);
       setMsg("✅ 신청 완료");
       setTimeout(() => setMsg(""), 2500);
     } catch (e: any) {
@@ -260,7 +277,6 @@ export default function ProductClient({ rawSku }: Props) {
             alt={product.name}
             fill
             style={{ objectFit: "contain" }}
-            // ✅ 이미지가 진짜 404일 때 화면이 빈칸처럼 보이니까 메시지로 바로 감지
             onError={() => {
               setMsg("제품 이미지가 없습니다. public/products 경로 및 파일명을 확인하세요.");
             }}
@@ -336,8 +352,7 @@ export default function ProductClient({ rawSku }: Props) {
 
           <div className="section">
             <div className="label">사진 첨부(선택)</div>
-
-            {/* ✅ capture 없음: 갤러리/카메라 선택은 기기 기본 UI */}
+            {/* ✅ capture 속성 없음 -> 기기 기본 UI에서 카메라/갤러리 선택 */}
             <input
               type="file"
               accept="image/jpeg,image/png"
@@ -370,7 +385,10 @@ export default function ProductClient({ rawSku }: Props) {
                 위치
               </div>
               <button
-                onClick={getLocation}
+                onClick={() => {
+                  // 지도만 보고 싶을 때도 가능
+                  getLocation();
+                }}
                 disabled={busy || submitted}
                 style={{
                   padding: "8px 10px",
@@ -410,7 +428,7 @@ export default function ProductClient({ rawSku }: Props) {
           </div>
 
           <button className="primary" onClick={submit} disabled={busy || submitted || !canSubmit}>
-            {submitted ? "신청완료" : "회수 요청"}
+            {submitted ? "신청완료" : busy ? "처리중..." : "회수 요청"}
           </button>
 
           {msg ? (
