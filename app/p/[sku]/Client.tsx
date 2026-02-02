@@ -15,7 +15,6 @@ function parseSkuAndItem(raw: string) {
   const s = (raw || "").trim();
   const up = s.toUpperCase();
 
-  // ms108_KDA0001 형태 지원: 첫 "_" 기준으로 분리
   const idx = up.indexOf("_");
   if (idx >= 0) {
     const sku = up.slice(0, idx);
@@ -25,7 +24,7 @@ function parseSkuAndItem(raw: string) {
   return { sku: up, item_no: null };
 }
 
-// ✅ 적재 X(초록), 적재 O(빨강) (사용자 화면 기준)
+// ✅ 적재 X(초록), 적재 O(빨강)
 function loadStatusChip(s: LoadStatus) {
   if (s === "X") return { text: "적재 X", bg: "#ecfff1", fg: "#166534" };
   if (s === "O") return { text: "적재 O", bg: "#ffecec", fg: "#b00020" };
@@ -65,7 +64,7 @@ async function compressImage(file: File, maxSide = 1280, quality = 0.75): Promis
 
     ctx.drawImage(img, 0, 0, nw, nh);
 
-    const outType = "image/jpeg"; // jpg로 통일해서 용량 절감
+    const outType = "image/jpeg";
     const blob: Blob = await new Promise((resolve, reject) => {
       canvas.toBlob(
         (b) => {
@@ -83,9 +82,7 @@ async function compressImage(file: File, maxSide = 1280, quality = 0.75): Promis
   }
 }
 
-type Props = {
-  sku: string;
-};
+type Props = { sku: string };
 
 export default function ProductClient({ sku: rawSku }: Props) {
   const { sku, item_no } = useMemo(() => parseSkuAndItem(rawSku), [rawSku]);
@@ -111,6 +108,9 @@ export default function ProductClient({ sku: rawSku }: Props) {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>("");
   const photoPreviewUrlRef = useRef<string>("");
+
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   const [sending, setSending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -165,15 +165,12 @@ export default function ProductClient({ sku: rawSku }: Props) {
           resolve({ lat: la, lng: ln, accuracy: Number.isFinite(ac) ? ac : 0 });
         },
         (err) => {
-          if (err.code === 1) reject(new Error("위치권한이 거부되었습니다. 브라우저 설정에서 위치권한을 허용해주세요."));
+          if (err.code === 1)
+            reject(new Error("위치권한이 거부되었습니다. 브라우저 설정에서 위치권한을 허용해주세요."));
           else if (err.code === 2) reject(new Error("위치 정보를 가져올 수 없습니다(신호 불안정)."));
           else reject(new Error("위치 요청이 시간초과되었습니다."));
         },
-        {
-          enableHighAccuracy: true,
-          timeout: 12000,
-          maximumAge: 0,
-        }
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
       );
     });
   };
@@ -186,7 +183,6 @@ export default function ProductClient({ sku: rawSku }: Props) {
       return;
     }
 
-    // ✅ 0 또는 공백이면 전송 불가
     if (!canSubmitQty) {
       setMsg("수량은 1 이상이어야 합니다.");
       return;
@@ -195,7 +191,6 @@ export default function ProductClient({ sku: rawSku }: Props) {
     setSending(true);
 
     try {
-      // ✅ 원클릭: 위치 먼저 받고 → 바로 전송
       const loc = await requestLocation();
       setLat(loc.lat);
       setLng(loc.lng);
@@ -205,7 +200,7 @@ export default function ProductClient({ sku: rawSku }: Props) {
       form.set("sku", sku);
       if (item_no) form.set("item_no", item_no);
 
-      form.set("qty", String(parsedQty)); // parsedQty는 number 확정
+      form.set("qty", String(parsedQty));
       form.set("load_status", loadStatus);
       form.set("note", (note || "").slice(0, 100));
 
@@ -220,12 +215,27 @@ export default function ProductClient({ sku: rawSku }: Props) {
       }
 
       const res = await fetch("/api/pickup", { method: "POST", body: form });
+
+      // ✅ 실패 응답도 JSON/텍스트 모두 안전 처리
       if (!res.ok) {
         const t = await res.text();
-        throw new Error(t || "전송 실패");
+        let errMsg = t || "전송 실패";
+        try {
+          const j = t ? JSON.parse(t) : null;
+          if (j?.error) errMsg = String(j.error);
+        } catch {}
+        throw new Error(errMsg);
       }
 
-      const data = (await res.json()) as any;
+      // ✅ 성공 응답도 안전 처리
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        throw new Error(text || "서버 응답이 JSON이 아닙니다.");
+      }
+
       if (data?.row?.address) setAddress(String(data.row.address));
       else if (data?.address) setAddress(String(data.address));
 
@@ -270,6 +280,14 @@ export default function ProductClient({ sku: rawSku }: Props) {
           padding: 12px 14px;
           border-radius: 12px;
           border: none;
+          font-weight: 1000;
+          cursor: pointer;
+        }
+        .btnGhost {
+          padding: 10px 12px;
+          border-radius: 12px;
+          border: 1px solid #e5e5e5;
+          background: #fff;
           font-weight: 1000;
           cursor: pointer;
         }
@@ -341,7 +359,6 @@ export default function ProductClient({ sku: rawSku }: Props) {
             const next = e.target.value;
             if (next === "" || /^\d+$/.test(next)) setQtyText(next);
           }}
-          // ✅ onBlur 자동복구 제거 (빈값을 1로 바꾸지 않음)
           placeholder="예: 1 (0 또는 공백은 불가)"
           style={{
             border: `1px solid ${canSubmitQty ? "#e5e5e5" : "#ffb4b4"}`,
@@ -365,7 +382,12 @@ export default function ProductClient({ sku: rawSku }: Props) {
             적재 X
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 900 }}>
-            <input type="radio" name="load" checked={loadStatus === "UNKNOWN"} onChange={() => setLoadStatus("UNKNOWN")} />
+            <input
+              type="radio"
+              name="load"
+              checked={loadStatus === "UNKNOWN"}
+              onChange={() => setLoadStatus("UNKNOWN")}
+            />
             알수없음
           </label>
         </div>
@@ -383,16 +405,59 @@ export default function ProductClient({ sku: rawSku }: Props) {
           {note.length}/100
         </div>
 
-        {/* ✅ 사진 */}
+        {/* ✅ 사진: 갤러리/카메라 선택 */}
         <label className="label">사진 첨부 (선택)</label>
+
+        {/* 숨김 input: 갤러리 */}
         <input
+          ref={galleryInputRef}
           className="input"
           type="file"
           accept="image/*"
+          style={{ display: "none" }}
           onChange={(e) => handlePickPhoto(e.target.files?.[0] || null)}
         />
+
+        {/* 숨김 input: 카메라 */}
+        <input
+          ref={cameraInputRef}
+          className="input"
+          type="file"
+          accept="image/*"
+          capture="environment"
+          style={{ display: "none" }}
+          onChange={(e) => handlePickPhoto(e.target.files?.[0] || null)}
+        />
+
+        <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+          <button
+            type="button"
+            className="btnGhost"
+            onClick={() => galleryInputRef.current?.click()}
+            style={{ flex: 1 }}
+          >
+            갤러리에서 선택
+          </button>
+          <button
+            type="button"
+            className="btnGhost"
+            onClick={() => cameraInputRef.current?.click()}
+            style={{ flex: 1 }}
+          >
+            카메라로 촬영
+          </button>
+        </div>
+
         {photoPreview ? (
-          <div style={{ marginTop: 10, borderRadius: 14, overflow: "hidden", border: "1px solid #eee", background: "#fafafa" }}>
+          <div
+            style={{
+              marginTop: 10,
+              borderRadius: 14,
+              overflow: "hidden",
+              border: "1px solid #eee",
+              background: "#fafafa",
+            }}
+          >
             <img
               src={photoPreview}
               alt="preview"

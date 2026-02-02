@@ -10,14 +10,7 @@ const supabase = createClient(supabaseUrl, serviceKey, {
   auth: { persistSession: false },
 });
 
-function isDataUrlImage(dataUrl: string) {
-  return /^data:image\/(jpeg|jpg|png);base64,/.test(dataUrl);
-}
-
-function extFromDataUrl(dataUrl: string) {
-  if (/^data:image\/png;base64,/.test(dataUrl)) return "png";
-  return "jpg";
-}
+type LoadStatus = "O" | "X" | "UNKNOWN";
 
 async function reverseGeocode(lat: number, lng: number): Promise<string> {
   try {
@@ -42,55 +35,108 @@ async function reverseGeocode(lat: number, lng: number): Promise<string> {
   }
 }
 
+function jsonError(message: string, status = 500) {
+  return NextResponse.json(
+    { ok: false, error: message },
+    { status, headers: { "Cache-Control": "no-store" } }
+  );
+}
+
+function toNum(v: any) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export async function POST(req: Request) {
   try {
     if (!supabaseUrl || !serviceKey) {
-      return new NextResponse("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY", { status: 500 });
+      return jsonError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY", 500);
     }
 
-    const body: any = await req.json();
+    const ct = (req.headers.get("content-type") || "").toLowerCase();
 
-    const sku = String(body?.sku || "").toUpperCase();
-    const itemNo = body?.itemNo ? String(body.itemNo) : null;
+    // ✅ FormData (Client.tsx가 보내는 방식)
+    let sku = "";
+    let itemNo: string | null = null;
+    let qtySafe = 1;
+    let loadStatus: LoadStatus = "UNKNOWN";
+    let note: string | null = null;
+    let lat: number | null = null;
+    let lng: number | null = null;
+    let accuracy: number | null = null;
+    let photoFile: File | null = null;
 
-    const qty = Number(body?.qty);
-    const qtySafe = Number.isFinite(qty) && qty > 0 ? Math.min(999, Math.floor(qty)) : 1;
+    if (ct.includes("multipart/form-data")) {
+      const form = await req.formData();
 
-    const loadStatus =
-      body?.loadStatus === "O" || body?.loadStatus === "X" ? body.loadStatus : "UNKNOWN";
+      sku = String(form.get("sku") || "").toUpperCase();
+      itemNo = form.get("item_no") ? String(form.get("item_no")) : null;
 
-    const note = body?.note ? String(body.note).slice(0, 100) : null;
+      const qty = toNum(form.get("qty"));
+      if (qty !== null && qty > 0) qtySafe = Math.min(999, Math.floor(qty));
 
-    const lat = Number(body?.lat);
-    const lng = Number(body?.lng);
-    const accuracy = body?.accuracy != null ? Number(body.accuracy) : null;
+      const ls = String(form.get("load_status") || "");
+      loadStatus = ls === "O" || ls === "X" ? (ls as LoadStatus) : "UNKNOWN";
 
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      return new NextResponse("Invalid location", { status: 400 });
+      note = form.get("note") ? String(form.get("note")).slice(0, 100) : null;
+
+      lat = toNum(form.get("lat"));
+      lng = toNum(form.get("lng"));
+      accuracy = form.get("accuracy") != null ? toNum(form.get("accuracy")) : null;
+
+      const p = form.get("photo");
+      if (p && typeof p === "object" && "arrayBuffer" in p) {
+        photoFile = p as File;
+      }
+    }
+    // ✅ 혹시 예전 JSON 방식 남아있을 수 있어 백워드 호환
+    else if (ct.includes("application/json")) {
+      const body: any = await req.json();
+
+      sku = String(body?.sku || "").toUpperCase();
+      itemNo = body?.itemNo ? String(body.itemNo) : null;
+
+      const qty = Number(body?.qty);
+      qtySafe = Number.isFinite(qty) && qty > 0 ? Math.min(999, Math.floor(qty)) : 1;
+
+      loadStatus =
+        body?.loadStatus === "O" || body?.loadStatus === "X" ? body.loadStatus : "UNKNOWN";
+
+      note = body?.note ? String(body.note).slice(0, 100) : null;
+
+      lat = Number(body?.lat);
+      lng = Number(body?.lng);
+      accuracy = body?.accuracy != null ? Number(body.accuracy) : null;
+
+      // JSON 방식은 파일을 못 받으니 생략
+      photoFile = null;
+    } else {
+      return jsonError("Unsupported content-type. Use multipart/form-data.", 400);
     }
 
-    // ✅ 주소 생성
+    if (!sku) return jsonError("Invalid sku", 400);
+    if (lat === null || lng === null) return jsonError("Invalid location", 400);
+
+    // ✅ 주소 생성(실패해도 저장은 진행)
     const address = await reverseGeocode(lat, lng);
 
     // ✅ 사진 업로드(옵션)
     let photoUrl: string | null = null;
 
-    const photoDataUrl = body?.photoDataUrl ? String(body.photoDataUrl) : "";
-    if (photoDataUrl) {
-      if (!isDataUrlImage(photoDataUrl)) {
-        return new NextResponse("Only JPG/PNG is allowed", { status: 400 });
-      }
+    if (photoFile) {
+      const t = (photoFile.type || "").toLowerCase();
+      const okType = t.includes("jpeg") || t.includes("jpg") || t.includes("png");
+      if (!okType) return jsonError("Only JPG/PNG is allowed", 400);
 
-      const comma = photoDataUrl.indexOf(",");
-      const b64 = comma >= 0 ? photoDataUrl.slice(comma + 1) : "";
-      const bytes = Buffer.from(b64, "base64");
+      const ab = await photoFile.arrayBuffer();
+      const bytes = Buffer.from(ab);
 
-      // 안전망
+      // 서버 안전망(3MB)
       if (bytes.length > 3 * 1024 * 1024) {
-        return new NextResponse("Photo too large (max 3MB after compression)", { status: 400 });
+        return jsonError("Photo too large (max 3MB after compression)", 400);
       }
 
-      const ext = extFromDataUrl(photoDataUrl);
+      const ext = t.includes("png") ? "png" : "jpg";
       const fileName = `${Date.now()}_${Math.random().toString(16).slice(2)}.${ext}`;
       const path = `uploads/${sku}/${fileName}`;
 
@@ -102,36 +148,40 @@ export async function POST(req: Request) {
         });
 
       if (upErr) {
-        return new NextResponse(`Photo upload failed: ${upErr.message}`, { status: 500 });
+        return jsonError(`Photo upload failed: ${upErr.message}`, 500);
       }
 
       const { data } = supabase.storage.from("pickup-photos").getPublicUrl(path);
       photoUrl = data?.publicUrl || null;
     }
 
-    // ✅ DB 저장
-    const { error } = await supabase.from("pickup_requests").insert([
-      {
-        sku,
-        item_no: itemNo,
-        qty: qtySafe,
-        load_status: loadStatus,
-        note,
-        lat,
-        lng,
-        accuracy: Number.isFinite(accuracy) ? accuracy : null,
-        address: address || null,
-        photo_url: photoUrl,
-      },
-    ]);
+    // ✅ DB 저장 (+ row 반환)
+    const { data: row, error } = await supabase
+      .from("pickup_requests")
+      .insert([
+        {
+          sku,
+          item_no: itemNo,
+          qty: qtySafe,
+          load_status: loadStatus,
+          note,
+          lat,
+          lng,
+          accuracy: accuracy !== null && Number.isFinite(accuracy) ? accuracy : null,
+          address: address || null,
+          photo_url: photoUrl,
+        },
+      ])
+      .select("*")
+      .single();
 
-    if (error) return new NextResponse(error.message, { status: 500 });
+    if (error) return jsonError(error.message, 500);
 
     return NextResponse.json(
-      { ok: true, address: address || "", photoUrl: photoUrl || "" },
-      { headers: { "Cache-Control": "no-store" } }
+      { ok: true, row },
+      { status: 200, headers: { "Cache-Control": "no-store" } }
     );
   } catch (e: any) {
-    return new NextResponse(e?.message || "Server error", { status: 500 });
+    return jsonError(e?.message || "Server error", 500);
   }
 }
