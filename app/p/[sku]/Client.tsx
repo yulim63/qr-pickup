@@ -1,472 +1,388 @@
 "use client";
 
 import Image from "next/image";
-import { useMemo, useRef, useState } from "react";
-import { PRODUCTS } from "@/lib/products";
+import { useMemo, useState } from "react";
 
-function makeGoogleEmbedSrc(lat: number, lng: number) {
+type Product = { name: string; img: string };
+type LoadStatus = "O" | "X" | "UNKNOWN";
+
+const PRODUCTS: Record<string, Product> = {
+  BPS: { name: "BPS", img: "/BPS.JPG" },
+  MS108: { name: "MS108", img: "/MS108.JPG" },
+  MS112: { name: "MS112", img: "/MS112.JPG" },
+};
+
+type Props = {
+  rawSku: string; // ex) "ms108_KDA0001"
+};
+
+function parseSku(rawSku: string) {
+  const up = (rawSku || "").toUpperCase();
+  const idx = up.indexOf("_");
+  if (idx < 0) return { sku: up, itemNo: "" };
+  return { sku: up.slice(0, idx), itemNo: up.slice(idx + 1) };
+}
+
+// ✅ JPG/PNG만, 긴변 1280px, JPEG 품질 0.75로 압축 (대부분 수백 KB로 떨어짐)
+async function compressImageToDataUrl(file: File): Promise<string> {
+  if (!/^image\/(jpeg|png)$/.test(file.type)) {
+    throw new Error("JPG/PNG만 업로드 가능합니다.");
+  }
+
+  const img = document.createElement("img");
+  const url = URL.createObjectURL(file);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("이미지 로드 실패"));
+      img.src = url;
+    });
+
+    const maxSide = 1280;
+    const w = img.naturalWidth;
+    const h = img.naturalHeight;
+
+    let nw = w;
+    let nh = h;
+    if (Math.max(w, h) > maxSide) {
+      const scale = maxSide / Math.max(w, h);
+      nw = Math.round(w * scale);
+      nh = Math.round(h * scale);
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = nw;
+    canvas.height = nh;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("canvas error");
+
+    ctx.drawImage(img, 0, 0, nw, nh);
+
+    // PNG도 용량 줄이려고 JPEG로 통일 (투명 필요하면 png로 바꿔도 됨)
+    let out = canvas.toDataURL("image/jpeg", 0.75);
+
+    // 너무 크면 한번 더 낮춤
+    const approxBytes = Math.floor((out.length * 3) / 4);
+    if (approxBytes > 2.2 * 1024 * 1024) {
+      out = canvas.toDataURL("image/jpeg", 0.6);
+    }
+
+    return out;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function makeEmbedMap(lat: number, lng: number) {
   return `https://www.google.com/maps?q=${lat},${lng}&z=16&output=embed`;
 }
 
-const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
-const MAX_EDGE = 1280;
-const JPEG_QUALITY = 0.72;
+export default function ProductClient({ rawSku }: Props) {
+  const { sku, itemNo } = useMemo(() => parseSku(rawSku), [rawSku]);
+  const product = useMemo(() => PRODUCTS[sku], [sku]);
 
-function loadImageFromFile(file: File): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new window.Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(img);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("이미지 로드 실패"));
-    };
-    img.src = url;
-  });
-}
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
 
-async function compressToJpegDataUrl(file: File): Promise<string> {
-  const img = await loadImageFromFile(file);
+  const [lat, setLat] = useState<number | null>(null);
+  const [lng, setLng] = useState<number | null>(null);
+  const [acc, setAcc] = useState<number | null>(null);
 
-  const w = img.width;
-  const h = img.height;
-
-  let newW = w;
-  let newH = h;
-
-  if (Math.max(w, h) > MAX_EDGE) {
-    if (w >= h) {
-      newW = MAX_EDGE;
-      newH = Math.round((h * MAX_EDGE) / w);
-    } else {
-      newH = MAX_EDGE;
-      newW = Math.round((w * MAX_EDGE) / h);
-    }
-  }
-
-  const canvas = document.createElement("canvas");
-  canvas.width = newW;
-  canvas.height = newH;
-
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("캔버스 생성 실패");
-
-  // 흰 배경(투명 PNG 대응)
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, newW, newH);
-
-  // @ts-ignore
-  ctx.imageSmoothingEnabled = true;
-  // @ts-ignore
-  ctx.imageSmoothingQuality = "high";
-
-  ctx.drawImage(img, 0, 0, newW, newH);
-
-  return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
-}
-
-function estimateDataUrlBytes(dataUrl: string) {
-  const idx = dataUrl.indexOf("base64,");
-  if (idx < 0) return 0;
-  const b64 = dataUrl.slice(idx + 7);
-  return Math.floor((b64.length * 3) / 4);
-}
-
-export default function ProductClient({ sku }: { sku: string }) {
-  const upper = (sku || "").toUpperCase();
-  const [baseSku, itemNoRaw] = upper.split("_", 2);
-  const itemNo = itemNoRaw ? itemNoRaw.trim() : "";
-
-  const product = useMemo(() => PRODUCTS[baseSku], [baseSku]);
-
-  const [status, setStatus] = useState<string>("");
-  const [sending, setSending] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-
-  const [qty, setQty] = useState<number>(1);
-  const [loadStatus, setLoadStatus] = useState<"O" | "X" | "UNKNOWN">("UNKNOWN");
-  const [note, setNote] = useState<string>("");
-
-  const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
-  const [photoInfo, setPhotoInfo] = useState<string>("");
-
-  const [lastCoord, setLastCoord] = useState<{ lat: number; lng: number; acc?: number } | null>(null);
   const [address, setAddress] = useState<string>("");
 
-  // ✅ 갤러리/카메라 선택용 input ref
-  const galleryInputRef = useRef<HTMLInputElement | null>(null);
-  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const [qty, setQty] = useState<number>(1);
+  const [loadStatus, setLoadStatus] = useState<LoadStatus>("UNKNOWN");
+  const [note, setNote] = useState<string>("");
 
-  if (!product) {
-    return (
-      <div style={{ padding: 24, fontFamily: "system-ui" }}>
-        <h2>제품을 찾을 수 없습니다</h2>
-        <div>QR 코드가 올바른지 확인해 주세요.</div>
-        <div style={{ marginTop: 8, opacity: 0.7 }}>입력값: {upper}</div>
-      </div>
-    );
-  }
+  const [photoDataUrl, setPhotoDataUrl] = useState<string>("");
+  const [photoPreview, setPhotoPreview] = useState<string>("");
 
-  const onPickPhoto = async (file: File | null) => {
-    try {
-      setPhotoInfo("");
-      setStatus("");
+  const canSubmit = !!product;
 
-      if (!file) {
-        setPhotoDataUrl(null);
-        return;
-      }
-
-      if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-        setStatus("사진 파일만 업로드 가능합니다. (JPG/PNG/WebP)");
-        setPhotoDataUrl(null);
-        return;
-      }
-
-      setStatus("사진 압축 중...");
-
-      const dataUrl = await compressToJpegDataUrl(file);
-
-      const bytes = estimateDataUrlBytes(dataUrl);
-      const kb = Math.round(bytes / 1024);
-      setPhotoInfo(`압축 완료: 약 ${kb}KB`);
-
-      setPhotoDataUrl(dataUrl);
-      setStatus("");
-    } catch (e: any) {
-      setStatus(`사진 처리 실패: ${e?.message || "오류"}`);
-      setPhotoDataUrl(null);
-    }
-  };
-
-  const requestPickup = async () => {
-    if (sending || submitted) return;
-
+  const getLocation = async () => {
+    setMsg("");
     if (!navigator.geolocation) {
-      setStatus("이 기기에서 위치 기능을 지원하지 않아요.");
+      setMsg("이 기기는 위치 기능을 지원하지 않습니다.");
       return;
     }
 
-    let qtySend = Number(qty);
-    if (!Number.isFinite(qtySend) || qtySend <= 0) qtySend = 1;
-    if (qtySend > 999) qtySend = 999;
+    setBusy(true);
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0,
+        });
+      });
 
-    const noteSend = (note || "").trim().slice(0, 100);
+      setLat(pos.coords.latitude);
+      setLng(pos.coords.longitude);
+      setAcc(pos.coords.accuracy ?? null);
+    } catch {
+      setMsg("위치권한이 거부되었습니다. 브라우저 설정에서 위치권한을 허용해주세요.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
-    const TARGET_ACCURACY_M = 30;
-    const MAX_WAIT_MS = 15000;
+  const onPickPhoto = async (file: File | null) => {
+    setMsg("");
+    if (!file) return;
+    try {
+      const dataUrl = await compressImageToDataUrl(file);
+      setPhotoDataUrl(dataUrl);
+      setPhotoPreview(dataUrl);
+    } catch (e: any) {
+      setMsg(e?.message || "사진 처리 실패");
+    }
+  };
 
-    setSending(true);
-    setStatus("정확한 GPS 잡는 중... 잠시만요.");
+  const submit = async () => {
+    setMsg("");
+    if (!canSubmit) return;
 
-    let done = false;
-    let timer: any = null;
-    let watchId: number | null = null;
+    if (!lat || !lng) {
+      await getLocation();
+      if (!lat || !lng) return;
+    }
 
-    const cleanup = () => {
-      if (timer) clearTimeout(timer);
-      if (watchId != null) navigator.geolocation.clearWatch(watchId);
-    };
-
-    const send = async (pos: GeolocationPosition) => {
-      const body = {
-        sku: product.sku,
-        itemNo: itemNo || null,
-        qty: qtySend,
-        loadStatus,
-        note: noteSend,
-        photoDataUrl: photoDataUrl || null,
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-        accuracy: pos.coords.accuracy ?? null,
-      };
-
+    setBusy(true);
+    try {
       const res = await fetch("/api/pickup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          sku,
+          itemNo: itemNo || null,
+          qty,
+          loadStatus,
+          note,
+          lat,
+          lng,
+          accuracy: acc,
+          photoDataUrl: photoDataUrl || null,
+        }),
       });
 
       if (!res.ok) {
         const t = await res.text();
-        setStatus(`전송 실패: ${t}`);
-        return false;
+        throw new Error(t || "전송 실패");
       }
 
-      const json = await res.json().catch(() => null);
-      const addr = json?.address ? String(json.address) : "";
+      const json = await res.json();
+      if (typeof json?.address === "string") setAddress(json.address);
 
-      setStatus(`회수 요청 완료! (정확도 약 ${Math.round(pos.coords.accuracy)}m)`);
-      setSubmitted(true);
-
-      setLastCoord({
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-        acc: pos.coords.accuracy ?? undefined,
-      });
-
-      setAddress(addr);
-
-      return true;
-    };
-
-    let lastPos: GeolocationPosition | null = null;
-
-    timer = setTimeout(async () => {
-      if (done) return;
-      done = true;
-      cleanup();
-
-      if (lastPos) {
-        setStatus("시간이 지나서 현재 측정값으로 전송합니다...");
-        await send(lastPos);
-      } else {
-        setStatus("위치 측정 실패(시간 초과). 잠시 후 다시 시도해 주세요.");
-      }
-
-      setSending(false);
-    }, MAX_WAIT_MS);
-
-    watchId = navigator.geolocation.watchPosition(
-      async (pos) => {
-        lastPos = pos;
-        const acc = pos.coords.accuracy ?? 9999;
-        setStatus(`위치 측정 중... (정확도 약 ${Math.round(acc)}m)`);
-
-        if (!done && acc <= TARGET_ACCURACY_M) {
-          done = true;
-          cleanup();
-          setStatus("정확도 기준 충족! 전송 중...");
-          await send(pos);
-          setSending(false);
-        }
-      },
-      (err) => {
-        cleanup();
-        setSending(false);
-
-        if (err.code === err.PERMISSION_DENIED) {
-          setStatus("위치 권한이 거부되었습니다. 브라우저 설정에서 위치 권한을 허용해 주세요.");
-        } else {
-          setStatus(`위치 확인 실패: ${err.message}`);
-        }
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
-    );
+      setMsg("✅ 신청 완료");
+      setTimeout(() => setMsg(""), 2500);
+    } catch (e: any) {
+      setMsg(`전송 실패: ${e?.message || "오류"}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
+  if (!product) {
+    return (
+      <div style={{ padding: 16, fontFamily: "system-ui", maxWidth: 520, margin: "0 auto" }}>
+        <h1 style={{ fontSize: 20, marginBottom: 8 }}>제품을 찾을 수 없습니다</h1>
+        <div style={{ opacity: 0.7 }}>가능한 코드: BPS, MS108, MS112</div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ padding: 24, fontFamily: "system-ui", maxWidth: 520, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 22, marginBottom: 8 }}>{product.name}</h1>
+    <div style={{ padding: 14, fontFamily: "system-ui", maxWidth: 520, margin: "0 auto" }}>
+      <style jsx>{`
+        .card {
+          border: 1px solid #e8e8e8;
+          border-radius: 18px;
+          overflow: hidden;
+          background: #fff;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+        }
+        .section {
+          border: 1px solid #ededed;
+          border-radius: 14px;
+          padding: 12px;
+          background: #fff;
+        }
+        .label {
+          font-weight: 900;
+          margin-bottom: 8px;
+        }
+        .input, .textarea {
+          width: 100%;
+          border: 1px solid #e5e5e5;
+          border-radius: 12px;
+          padding: 10px 12px;
+          font-size: 14px;
+          box-sizing: border-box;
+        }
+        .textarea {
+          min-height: 90px;
+          resize: none;
+        }
+        .primary {
+          width: 100%;
+          padding: 14px;
+          border-radius: 14px;
+          border: none;
+          font-weight: 1000;
+          font-size: 16px;
+          color: #fff;
+          background: ${busy ? "#c9d3ff" : "#3b5bff"};
+          cursor: ${busy ? "not-allowed" : "pointer"};
+        }
+        .chip {
+          display: inline-block;
+          padding: 4px 10px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 900;
+          background: #eef2ff;
+          color: #1f2a6b;
+        }
+      `}</style>
 
-      {itemNo && (
-        <div style={{ marginBottom: 10, fontSize: 14, fontWeight: 900 }}>
-          개별번호: {itemNo}
+      <div className="card">
+        <div style={{ position: "relative", width: "100%", height: 260, background: "#f6f7f9" }}>
+          <Image src={product.img} alt={product.name} fill style={{ objectFit: "contain" }} />
         </div>
-      )}
 
-      <div style={{ borderRadius: 12, overflow: "hidden", border: "1px solid #e5e5e5" }}>
-        <Image
-          src={product.image}
-          alt={product.name}
-          width={900}
-          height={900}
-          style={{ width: "100%", height: "auto" }}
-        />
-      </div>
+        <div style={{ padding: 14, display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ fontSize: 18, fontWeight: 1000 }}>{product.name}</div>
+            {itemNo ? <span className="chip">{itemNo}</span> : null}
+          </div>
 
-      <p style={{ marginTop: 14, lineHeight: 1.5 }}>{product.message}</p>
-
-      <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>상태 확인</div>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-            <input type="radio" name="loadStatus" checked={loadStatus === "O"} onChange={() => setLoadStatus("O")} />
-            적재 O
-          </label>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-            <input type="radio" name="loadStatus" checked={loadStatus === "X"} onChange={() => setLoadStatus("X")} />
-            적재 X
-          </label>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+          <div className="section">
+            <div className="label">수량</div>
             <input
-              type="radio"
-              name="loadStatus"
-              checked={loadStatus === "UNKNOWN"}
-              onChange={() => setLoadStatus("UNKNOWN")}
+              className="input"
+              type="number"
+              min={1}
+              max={999}
+              value={qty}
+              onChange={(e) => setQty(Math.max(1, Math.min(999, Number(e.target.value) || 1)))}
             />
-            알수없음
-          </label>
-        </div>
-      </div>
+          </div>
 
-      <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>수량</div>
-        <input
-          type="number"
-          min={1}
-          max={999}
-          value={qty}
-          onChange={(e) => setQty(Number(e.target.value))}
-          style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e5e5", fontSize: 14 }}
-        />
-      </div>
+          <div className="section">
+            <div className="label">상태 확인</div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input type="radio" name="load" checked={loadStatus === "O"} onChange={() => setLoadStatus("O")} />
+                적재 O
+              </label>
+              <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input type="radio" name="load" checked={loadStatus === "X"} onChange={() => setLoadStatus("X")} />
+                적재 X
+              </label>
+              <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input
+                  type="radio"
+                  name="load"
+                  checked={loadStatus === "UNKNOWN"}
+                  onChange={() => setLoadStatus("UNKNOWN")}
+                />
+                알수없음
+              </label>
+            </div>
+          </div>
 
-      <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>비고</div>
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value.slice(0, 100))}
-          maxLength={100}
-          placeholder="최대 100글자 (특이사항 및 연락처 등 입력)"
-          style={{
-            width: "100%",
-            minHeight: 80,
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid #e5e5e5",
-            fontSize: 14,
-            resize: "vertical",
-          }}
-        />
-        <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>{note.length}/100</div>
-      </div>
+          <div className="section">
+            <div className="label">비고</div>
+            <textarea
+              className="textarea"
+              value={note}
+              onChange={(e) => setNote(e.target.value.slice(0, 100))}
+              placeholder="최대 100글자 / 특이사항 및 연락처 등 입력"
+            />
+            <div style={{ textAlign: "right", opacity: 0.6, fontSize: 12 }}>{note.length}/100</div>
+          </div>
 
-      {/* ✅ 사진 첨부: 갤러리/카메라 선택 */}
-      <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>
-          사진 첨부(선택) - JPG/PNG/WebP
-        </div>
+          <div className="section">
+            <div className="label">사진 첨부(선택)</div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            onClick={() => galleryInputRef.current?.click()}
-            style={{
-              padding: "10px 12px",
-              borderRadius: 10,
-              border: "1px solid #e5e5e5",
-              background: "#fff",
-              fontWeight: 900,
-              cursor: "pointer",
-            }}
-          >
-            갤러리 선택
+            {/* ✅ capture 속성 없음 => 갤러리/카메라 선택은 기기 기본 UI */}
+            <input type="file" accept="image/jpeg,image/png" onChange={(e) => onPickPhoto(e.target.files?.[0] || null)} />
+
+            {photoPreview ? (
+              <div style={{ marginTop: 10, borderRadius: 12, overflow: "hidden", border: "1px solid #eee" }}>
+                <img
+                  src={photoPreview}
+                  alt="preview"
+                  style={{
+                    width: "100%",
+                    maxHeight: 240,
+                    objectFit: "contain",
+                    display: "block",
+                    background: "#fafafa",
+                  }}
+                />
+              </div>
+            ) : (
+              <div style={{ marginTop: 10, opacity: 0.6, fontSize: 13 }}>사진 없음</div>
+            )}
+          </div>
+
+          <div className="section">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <div className="label" style={{ marginBottom: 0 }}>위치</div>
+              <button
+                onClick={getLocation}
+                disabled={busy}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 12,
+                  border: "1px solid #e5e5e5",
+                  background: "#fff",
+                  fontWeight: 900,
+                  cursor: busy ? "not-allowed" : "pointer",
+                }}
+              >
+                위치 가져오기
+              </button>
+            </div>
+
+            {lat && lng ? (
+              <>
+                <div style={{ marginTop: 10, border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>
+                  <iframe title="map" src={makeEmbedMap(lat, lng)} width="100%" height="220" style={{ border: 0, display: "block" }} loading="lazy" />
+                </div>
+                <div style={{ marginTop: 10, fontSize: 13, opacity: 0.8 }}>정확도: {acc ? `${Math.round(acc)}m` : "-"}</div>
+                <div style={{ marginTop: 6, fontSize: 14 }}>
+                  <b>주소:</b> {address ? address : "신청 후 자동 표시됩니다"}
+                </div>
+              </>
+            ) : (
+              <div style={{ marginTop: 10, opacity: 0.7, fontSize: 14 }}>위치를 가져오면 지도가 표시됩니다.</div>
+            )}
+          </div>
+
+          <button className="primary" onClick={submit} disabled={busy || !canSubmit}>
+            회수 요청
           </button>
 
-          <button
-            type="button"
-            onClick={() => cameraInputRef.current?.click()}
-            style={{
-              padding: "10px 12px",
-              borderRadius: 10,
-              border: "1px solid #e5e5e5",
-              background: "#fff",
-              fontWeight: 900,
-              cursor: "pointer",
-            }}
-          >
-            카메라 촬영
-          </button>
-        </div>
-
-        <input
-          ref={galleryInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          style={{ display: "none" }}
-          onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
-        />
-
-        <input
-          ref={cameraInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          capture="environment"
-          style={{ display: "none" }}
-          onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
-        />
-
-        {photoInfo && <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>{photoInfo}</div>}
-
-        {/* ✅ 미리보기 크기 제한 */}
-        {photoDataUrl && (
-          <div
-            style={{
-              marginTop: 8,
-              border: "1px solid #e5e5e5",
-              borderRadius: 12,
-              overflow: "hidden",
-              background: "#fafafa",
-            }}
-          >
-            <img
-              src={photoDataUrl}
-              alt="preview"
+          {msg ? (
+            <div
               style={{
-                width: "100%",
-                maxHeight: 260,
-                objectFit: "contain",
-                display: "block",
+                padding: 12,
+                borderRadius: 14,
+                background: msg.startsWith("✅") ? "#ecfff1" : "#ffecec",
+                color: msg.startsWith("✅") ? "#166534" : "#b00020",
+                fontWeight: 800,
               }}
-            />
-          </div>
-        )}
+            >
+              {msg}
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      <button
-        onClick={requestPickup}
-        disabled={sending || submitted}
-        style={{
-          marginTop: 12,
-          width: "100%",
-          padding: "14px 16px",
-          borderRadius: 12,
-          border: "none",
-          fontSize: 16,
-          fontWeight: 900,
-          cursor: sending || submitted ? "not-allowed" : "pointer",
-          opacity: submitted ? 0.7 : 1,
-        }}
-      >
-        {submitted ? "신청완료" : sending ? "전송 중..." : "회수요청"}
-      </button>
-
-      {status && <div style={{ marginTop: 12, fontSize: 14, opacity: 0.9 }}>{status}</div>}
-
-      {submitted && (
-        <div style={{ marginTop: 10, fontSize: 13, opacity: 0.9 }}>
-          주소: {address ? address : "주소 확인 중..."}
-        </div>
-      )}
-
-      {lastCoord && Number.isFinite(lastCoord.lat) && Number.isFinite(lastCoord.lng) && (
-        <div style={{ marginTop: 14 }}>
-          <a
-            href={`https://www.google.com/maps?q=${lastCoord.lat},${lastCoord.lng}`}
-            target="_blank"
-            rel="noreferrer"
-            style={{ display: "inline-block", marginBottom: 10, fontWeight: 800 }}
-          >
-            구글지도 열기
-          </a>
-
-          <div style={{ border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>
-            <iframe
-              key={`${lastCoord.lat},${lastCoord.lng}`}
-              title="map"
-              width="100%"
-              height="280"
-              style={{ border: 0, display: "block" }}
-              src={makeGoogleEmbedSrc(lastCoord.lat, lastCoord.lng)}
-              loading="lazy"
-            />
-          </div>
-        </div>
-      )}
+      <div style={{ marginTop: 10, textAlign: "center", opacity: 0.45, fontSize: 12 }}>QR Pickup</div>
     </div>
   );
 }
