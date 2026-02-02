@@ -7,13 +7,15 @@ type Row = {
   created_at: string;
   sku: string;
   item_no: string | null;
+  qty: number | null;
   lat: number;
   lng: number;
   accuracy: number | null;
+  address: string | null;
+  photo_url: string | null;
 };
 
 function toKstDateKey(iso: string) {
-  // YYYY-MM-DD (KST 기준) 만들기
   const d = new Date(iso);
   const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
   const y = kst.getUTCFullYear();
@@ -26,16 +28,29 @@ function toKstLabel(iso: string) {
   return new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
 }
 
+function makeOsmEmbedSrc(lat: number, lng: number) {
+  // ✅ 동네 수준 줌(네가 말한 “두번째 사진” 느낌)
+  const d = 0.0045;
+  const lat1 = (lat - d).toFixed(6);
+  const lat2 = (lat + d).toFixed(6);
+  const lng1 = (lng - d).toFixed(6);
+  const lng2 = (lng + d).toFixed(6);
+
+  return `https://www.openstreetmap.org/export/embed.html?layer=mapnik&bbox=${lng1},${lat1},${lng2},${lat2}&marker=${lat.toFixed(
+    6
+  )},${lng.toFixed(6)}`;
+}
+
 export default function AdminClient({ initialRows }: { initialRows: Row[] }) {
-  // 🔎 입력값(타이핑)
   const [qInput, setQInput] = useState("");
-  // 🔎 실제 적용되는 검색어(검색 버튼 누르거나 Enter 치면 세팅)
   const [qApplied, setQApplied] = useState("");
 
-  // 필터
   const [skuFilter, setSkuFilter] = useState<string>("ALL");
-  const [dateFrom, setDateFrom] = useState<string>(""); // YYYY-MM-DD
-  const [dateTo, setDateTo] = useState<string>(""); // YYYY-MM-DD
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
+
+  // 사진 펼침 상태 (row id 기준)
+  const [photoOpen, setPhotoOpen] = useState<Record<string, boolean>>({});
 
   const allSkus = useMemo(() => {
     const set = new Set<string>();
@@ -57,8 +72,6 @@ export default function AdminClient({ initialRows }: { initialRows: Row[] }) {
 
   const filtered = useMemo(() => {
     const q = qApplied.trim().toUpperCase();
-
-    // 1) 필터링
     let rows = initialRows;
 
     if (skuFilter !== "ALL") {
@@ -66,12 +79,8 @@ export default function AdminClient({ initialRows }: { initialRows: Row[] }) {
       rows = rows.filter((r) => String(r.sku || "").toUpperCase() === skuU);
     }
 
-    if (dateFrom) {
-      rows = rows.filter((r) => toKstDateKey(r.created_at) >= dateFrom);
-    }
-    if (dateTo) {
-      rows = rows.filter((r) => toKstDateKey(r.created_at) <= dateTo);
-    }
+    if (dateFrom) rows = rows.filter((r) => toKstDateKey(r.created_at) >= dateFrom);
+    if (dateTo) rows = rows.filter((r) => toKstDateKey(r.created_at) <= dateTo);
 
     if (q) {
       rows = rows.filter((r) => {
@@ -81,9 +90,9 @@ export default function AdminClient({ initialRows }: { initialRows: Row[] }) {
       });
     }
 
-    // 2) “정확 일치(item_no)”면 맨 위로 올리기 + 하이라이트
-    //    - item_no가 q와 완전 동일한 row들을 먼저
-    //    - 그 다음 나머지 (created_at desc 유지하고 싶으면 여기서 정렬)
+    // 정확 일치(item_no === 검색어) 먼저 상단 고정
+    const sortDesc = (a: Row, b: Row) => (a.created_at < b.created_at ? 1 : -1);
+
     if (q) {
       const exact: Row[] = [];
       const rest: Row[] = [];
@@ -92,19 +101,12 @@ export default function AdminClient({ initialRows }: { initialRows: Row[] }) {
         if (item && item === q) exact.push(rows[i]);
         else rest.push(rows[i]);
       }
-      // 최신순 유지 (혹시 initialRows가 이미 최신순이면 이거 없어도 됨)
-      const sortDesc = (a: Row, b: Row) => (a.created_at < b.created_at ? 1 : -1);
       exact.sort(sortDesc);
       rest.sort(sortDesc);
-
       return { rows: exact.concat(rest), qUpper: q, exactCount: exact.length };
     }
 
-    // 검색어 없을 때도 최신순 유지
-    const sortDesc = (a: Row, b: Row) => (a.created_at < b.created_at ? 1 : -1);
-    const copy = rows.slice().sort(sortDesc);
-
-    return { rows: copy, qUpper: "", exactCount: 0 };
+    return { rows: rows.slice().sort(sortDesc), qUpper: "", exactCount: 0 };
   }, [initialRows, qApplied, skuFilter, dateFrom, dateTo]);
 
   const rows = filtered.rows;
@@ -115,16 +117,8 @@ export default function AdminClient({ initialRows }: { initialRows: Row[] }) {
     <div style={{ padding: 24, fontFamily: "system-ui", maxWidth: 1040, margin: "0 auto" }}>
       <h1 style={{ fontSize: 22, margin: 0 }}>회수 요청 목록</h1>
 
-      {/* 상단 컨트롤 */}
-      <div
-        style={{
-          marginTop: 12,
-          display: "grid",
-          gap: 10,
-          gridTemplateColumns: "1fr",
-        }}
-      >
-        {/* 검색 영역 */}
+      {/* 검색/필터 */}
+      <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <input
             value={qInput}
@@ -132,7 +126,7 @@ export default function AdminClient({ initialRows }: { initialRows: Row[] }) {
             onKeyDown={(e) => {
               if (e.key === "Enter") applySearch();
             }}
-            placeholder="개별번호(KDA0001) / SKU(MS108) 검색 (예: K, KDA, 0001...)"
+            placeholder="개별번호/제품 검색 (예: K, KDA, 0001, MS108...)"
             style={{
               flex: "1 1 360px",
               padding: "10px 12px",
@@ -174,12 +168,11 @@ export default function AdminClient({ initialRows }: { initialRows: Row[] }) {
 
           <div style={{ fontSize: 13, opacity: 0.85 }}>
             {qApplied.trim()
-              ? `검색결과 ${rows.length}건${exactCount ? ` (정확 일치 ${exactCount}건 상단 고정)` : ""}`
+              ? `검색결과 ${rows.length}건${exactCount ? ` (정확 일치 ${exactCount}건 상단)` : ""}`
               : `총 ${initialRows.length}건`}
           </div>
         </div>
 
-        {/* 드롭다운/날짜 필터 */}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <div style={{ fontSize: 13, opacity: 0.85, minWidth: 46 }}>제품</div>
@@ -234,12 +227,6 @@ export default function AdminClient({ initialRows }: { initialRows: Row[] }) {
               }}
             />
           </div>
-
-          {(skuFilter !== "ALL" || dateFrom || dateTo) && (
-            <div style={{ fontSize: 13, opacity: 0.75 }}>
-              필터 적용 중
-            </div>
-          )}
         </div>
       </div>
 
@@ -256,9 +243,15 @@ export default function AdminClient({ initialRows }: { initialRows: Row[] }) {
           const itemUpper = String(r.item_no || "").toUpperCase();
           const isExactHighlight = qUpper && itemUpper && itemUpper === qUpper;
 
+          const idKey = String(r.id);
+          const hasPhoto = !!r.photo_url;
+          const isOpen = !!photoOpen[idKey];
+
+          const qty = r.qty && Number(r.qty) > 0 ? Number(r.qty) : 1;
+
           return (
             <div
-              key={String(r.id)}
+              key={idKey}
               style={{
                 border: isExactHighlight ? "2px solid #111" : "1px solid #e5e5e5",
                 borderRadius: 12,
@@ -305,12 +298,17 @@ export default function AdminClient({ initialRows }: { initialRows: Row[] }) {
                 {r.item_no ? <span style={{ fontWeight: 800 }}> / {r.item_no}</span> : null}
               </div>
 
+              <div style={{ marginTop: 6, fontSize: 13 }}>수량: {qty}</div>
+
               <div style={{ marginTop: 6, fontSize: 13 }}>
                 좌표: {lat.toFixed(6)}, {lng.toFixed(6)}
               </div>
 
-              <div style={{ marginTop: 4, fontSize: 13 }}>
-                정확도: {acc == null ? "-" : Math.round(acc)} m
+              <div style={{ marginTop: 4, fontSize: 13 }}>정확도: {acc == null ? "-" : Math.round(acc)} m</div>
+
+              {/* 주소 */}
+              <div style={{ marginTop: 6, fontSize: 13, opacity: 0.9 }}>
+                주소: {r.address ? r.address : "조회중/없음"}
               </div>
 
               <a
@@ -322,17 +320,40 @@ export default function AdminClient({ initialRows }: { initialRows: Row[] }) {
                 구글지도 열기
               </a>
 
-              <div style={{ marginTop: 10, border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>
-                <iframe
-                  title={`map-${String(r.id)}`}
-                  width="100%"
-                  height="260"
-                  style={{ border: 0, display: "block" }}
-                  src={`https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.003},${lat - 0.003},${
-                    lng + 0.003
-                  },${lat + 0.003}&layer=mapnik&marker=${lat},${lng}`}
-                />
+              {/* 사진 펼치기 */}
+              <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  disabled={!hasPhoto}
+                  onClick={() => {
+                    if (!hasPhoto) return;
+                    setPhotoOpen((prev) => ({ ...prev, [idKey]: !prev[idKey] }));
+                  }}
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "1px solid #e5e5e5",
+                    background: hasPhoto ? "white" : "#f3f3f3",
+                    fontWeight: 900,
+                    cursor: hasPhoto ? "pointer" : "not-allowed",
+                    opacity: hasPhoto ? 1 : 0.6,
+                  }}
+                >
+                  {hasPhoto ? (isOpen ? "사진 접기" : "사진 펼치기") : "사진 없음"}
+                </button>
               </div>
+
+              {hasPhoto && isOpen && (
+                <div style={{ marginTop: 10, border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>
+                  <img src={r.photo_url!} alt="photo" style={{ width: "100%", display: "block" }} />
+                </div>
+              )}
+
+              {/* 지도 (유효한 lat/lng일 때만 렌더) */}
+              {Number.isFinite(lat) && Number.isFinite(lng) && (
+                <div style={{ marginTop: 10, border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>
+                  <iframe title={`map-${idKey}`} width="100%" height="260" style={{ border: 0, display: "block" }} src={makeOsmEmbedSrc(lat, lng)} />
+                </div>
+              )}
             </div>
           );
         })}

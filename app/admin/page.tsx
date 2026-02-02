@@ -9,7 +9,7 @@ export default async function AdminPage() {
 
   const { data, error } = await sb
     .from("pickup_requests")
-    .select("id, created_at, sku, item_no, lat, lng, accuracy")
+    .select("id, created_at, sku, item_no, qty, lat, lng, accuracy, address, photo_url")
     .order("created_at", { ascending: false })
     .limit(500);
 
