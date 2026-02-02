@@ -1,449 +1,425 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-type Row = {
-  id: string | number;
+type LoadStatus = "O" | "X" | "UNKNOWN";
+
+type PickupRow = {
+  id: string;
   created_at: string;
-
   sku: string;
   item_no: string | null;
-
   qty: number | null;
-
-  load_status: string | null; // 'O' | 'X' | 'UNKNOWN'
+  load_status: LoadStatus | null;
   note: string | null;
 
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   accuracy: number | null;
 
   address: string | null;
-  photo_url: string | null;
+
+  photo_url: string | null; // ✅ 사진 URL(없으면 null)
 };
 
-function toKstDateKey(iso: string) {
-  const d = new Date(iso);
-  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
-  const y = kst.getUTCFullYear();
-  const m = String(kst.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(kst.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`; // yyyy-mm-dd
+function fmtKST(ts: string) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  return d.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
 }
 
-function toKstLabel(iso: string) {
-  return new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+function accuracyBadge(acc: number | null) {
+  if (!acc || !Number.isFinite(acc)) return null;
+  const isBad = acc >= 100; // 100m 이상 빨간 배지
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 900,
+        background: isBad ? "#ffdddd" : "#eef2ff",
+        color: isBad ? "#b00020" : "#1f2a6b",
+        marginLeft: 8,
+        whiteSpace: "nowrap",
+      }}
+      title={isBad ? "정확도 낮음(100m 이상)" : "정확도 양호"}
+    >
+      {Math.round(acc)}m
+    </span>
+  );
 }
 
-function statusLabel(v: string | null | undefined) {
-  const u = String(v || "UNKNOWN").toUpperCase();
-  if (u === "O") return "적재 O";
-  if (u === "X") return "적재 X";
-  return "알수없음";
+function makeGoogleLink(lat: number | null, lng: number | null) {
+  if (!lat || !lng) return "";
+  return `https://www.google.com/maps?q=${lat},${lng}`;
 }
 
-function makeGoogleEmbedSrc(lat: number, lng: number) {
-  return `https://www.google.com/maps?q=${lat},${lng}&z=16&output=embed`;
-}
+export default function AdminClient() {
+  const [rows, setRows] = useState<PickupRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string>("");
 
-export default function AdminClient({ initialRows }: { initialRows: Row[] }) {
-  // 검색
-  const [qInput, setQInput] = useState("");
-  const [qApplied, setQApplied] = useState("");
-
-  // 필터
+  // 검색/필터
+  const [q, setQ] = useState("");
   const [skuFilter, setSkuFilter] = useState<string>("ALL");
-  const [dateFrom, setDateFrom] = useState<string>("");
-  const [dateTo, setDateTo] = useState<string>("");
+  const [dateFilter, setDateFilter] = useState<string>("ALL"); // YYYY-MM-DD (KST 기준)
 
-  // 사진 펼침 상태
-  const [photoOpen, setPhotoOpen] = useState<Record<string, boolean>>({});
+  // 사진 모달
+  const [photoModalUrl, setPhotoModalUrl] = useState<string | null>(null);
+  const [photoModalTitle, setPhotoModalTitle] = useState<string>("");
 
-  // 주소 재생성
-  const [backfillLoading, setBackfillLoading] = useState(false);
-  const [backfillMsg, setBackfillMsg] = useState("");
-
-  const allSkus = useMemo(() => {
-    const set = new Set<string>();
-    for (let i = 0; i < initialRows.length; i++) {
-      const s = String(initialRows[i]?.sku || "").toUpperCase();
-      if (s) set.add(s);
-    }
-    return Array.from(set).sort();
-  }, [initialRows]);
-
-  const applySearch = () => setQApplied(qInput.trim());
-
-  const resetAll = () => {
-    setQInput("");
-    setQApplied("");
-    setSkuFilter("ALL");
-    setDateFrom("");
-    setDateTo("");
-  };
-
-  const runBackfill = async () => {
-    if (backfillLoading) return;
-
+  const fetchList = async () => {
+    setLoading(true);
+    setErr("");
     try {
-      setBackfillLoading(true);
-      setBackfillMsg("주소 재생성 중...");
-
-      const res = await fetch("/api/admin/backfill-addresses", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limit: 30 }),
-      });
-
+      const res = await fetch("/api/admin/list", { cache: "no-store" });
       if (!res.ok) {
         const t = await res.text();
-        setBackfillMsg(`실패: ${t}`);
-        setBackfillLoading(false);
-        return;
+        throw new Error(t || "관리자 조회 실패");
       }
-
-      const json = await res.json().catch(() => null);
-      const updated = Number(json?.updated || 0);
-      const remaining = Number(json?.remaining || 0);
-
-      setBackfillMsg(`완료: ${updated}건 주소 생성 / 남은 주소 없음 데이터: ${remaining}건`);
-
-      setTimeout(() => window.location.reload(), 600);
+      const data = (await res.json()) as { rows: PickupRow[] };
+      setRows(Array.isArray(data.rows) ? data.rows : []);
     } catch (e: any) {
-      setBackfillMsg(`실패: ${e?.message || "오류"}`);
+      setErr(e?.message || "오류");
     } finally {
-      setBackfillLoading(false);
+      setLoading(false);
     }
   };
 
-  const computed = useMemo(() => {
-    const q = qApplied.trim().toUpperCase();
+  useEffect(() => {
+    fetchList();
+  }, []);
 
-    let rows = initialRows;
+  const skuOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (let i = 0; i < rows.length; i++) s.add(String(rows[i].sku || "").toUpperCase());
+    return ["ALL", ...Array.from(s).sort()];
+  }, [rows]);
 
-    // 제품
-    if (skuFilter !== "ALL") {
-      const s = skuFilter.toUpperCase();
-      rows = rows.filter((r) => String(r.sku || "").toUpperCase() === s);
+  const dateOptions = useMemo(() => {
+    // KST 기준 날짜만 뽑기
+    const s = new Set<string>();
+    for (let i = 0; i < rows.length; i++) {
+      const d = new Date(rows[i].created_at);
+      if (Number.isNaN(d.getTime())) continue;
+      const kst = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }); // YYYY-MM-DD
+      s.add(kst);
     }
+    return ["ALL", ...Array.from(s).sort().reverse()];
+  }, [rows]);
 
-    // 날짜(KST 기준)
-    if (dateFrom) rows = rows.filter((r) => toKstDateKey(r.created_at) >= dateFrom);
-    if (dateTo) rows = rows.filter((r) => toKstDateKey(r.created_at) <= dateTo);
+  const filtered = useMemo(() => {
+    const text = (q || "").trim().toUpperCase();
+    const fSku = skuFilter;
 
-    // 검색(개별번호 + 제품)
-    if (q) {
-      rows = rows.filter((r) => {
-        const sku = String(r.sku || "").toUpperCase();
-        const item = String(r.item_no || "").toUpperCase();
-        return item.includes(q) || sku.includes(q);
-      });
-    }
+    const out: PickupRow[] = [];
 
-    const sortDesc = (a: Row, b: Row) => (a.created_at < b.created_at ? 1 : -1);
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
 
-    // 정확 일치(item_no === q) 상단 고정
-    if (q) {
-      const exact: Row[] = [];
-      const rest: Row[] = [];
-      for (let i = 0; i < rows.length; i++) {
-        const item = String(rows[i].item_no || "").toUpperCase();
-        if (item && item === q) exact.push(rows[i]);
-        else rest.push(rows[i]);
+      // 제품 필터
+      if (fSku !== "ALL" && String(r.sku || "").toUpperCase() !== fSku) continue;
+
+      // 날짜 필터 (KST)
+      if (dateFilter !== "ALL") {
+        const d = new Date(r.created_at);
+        const kst = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+        if (kst !== dateFilter) continue;
       }
-      exact.sort(sortDesc);
-      rest.sort(sortDesc);
-      return {
-        rows: exact.concat(rest),
-        qUpper: q,
-        exactCount: exact.length,
-      };
+
+      if (text) {
+        const item = (r.item_no || "").toUpperCase();
+        const sku = (r.sku || "").toUpperCase();
+        const addr = (r.address || "").toUpperCase();
+        const note = (r.note || "").toUpperCase();
+
+        // "K"만 쳐도 item_no 기준으로 매칭되게 + sku/주소/비고도 같이
+        const hit =
+          item.includes(text) || sku.includes(text) || addr.includes(text) || note.includes(text);
+        if (!hit) continue;
+      }
+
+      out.push(r);
     }
 
-    return { rows: rows.slice().sort(sortDesc), qUpper: "", exactCount: 0 };
-  }, [initialRows, qApplied, skuFilter, dateFrom, dateTo]);
+    // 검색어가 item_no와 완전 일치하면 맨 위로 올리고 하이라이트 대상이 되도록 정렬
+    if (text) {
+      out.sort((a, b) => {
+        const aItem = (a.item_no || "").toUpperCase();
+        const bItem = (b.item_no || "").toUpperCase();
+        const aExact = aItem === text ? 1 : 0;
+        const bExact = bItem === text ? 1 : 0;
+        if (aExact !== bExact) return bExact - aExact;
 
-  const rows = computed.rows;
-  const qUpper = computed.qUpper;
-  const exactCount = computed.exactCount;
+        // 최신순
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+    } else {
+      // 기본 최신순
+      out.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
+
+    return out;
+  }, [rows, q, skuFilter, dateFilter]);
+
+  const exactMatchItem = useMemo(() => (q || "").trim().toUpperCase(), [q]);
+
+  const openPhoto = (url: string, title: string) => {
+    setPhotoModalTitle(title);
+    setPhotoModalUrl(url);
+  };
+
+  const closePhoto = () => {
+    setPhotoModalUrl(null);
+    setPhotoModalTitle("");
+  };
 
   return (
-    <div style={{ padding: 20, fontFamily: "system-ui", maxWidth: 720, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 22, margin: 0 }}>회수 요청 목록</h1>
+    <div style={{ padding: 16, fontFamily: "system-ui", maxWidth: 980, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 22, marginBottom: 10 }}>회수 요청 목록</h1>
 
-      {/* 검색/필터 */}
-      <div style={{ marginTop: 12, border: "1px solid #e5e5e5", borderRadius: 12, padding: 12 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <input
-            value={qInput}
-            onChange={(e) => setQInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") applySearch();
-            }}
-            placeholder="개별번호/제품 검색 (예: K, KDA0001, MS108...)"
-            style={{
-              flex: "1 1 320px",
-              padding: "10px 12px",
-              borderRadius: 10,
-              border: "1px solid #e5e5e5",
-              fontSize: 14,
-              outline: "none",
-            }}
-          />
-          <button
-            onClick={applySearch}
-            style={{
-              padding: "10px 14px",
-              borderRadius: 10,
-              border: "1px solid #111",
-              background: "#111",
-              color: "white",
-              fontWeight: 900,
-              cursor: "pointer",
-            }}
-          >
-            검색
-          </button>
-          <button
-            onClick={resetAll}
-            style={{
-              padding: "10px 12px",
-              borderRadius: 10,
-              border: "1px solid #e5e5e5",
-              background: "white",
-              fontWeight: 900,
-              cursor: "pointer",
-            }}
-          >
-            전체조회
-          </button>
-        </div>
+      {/* 필터/검색 */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 160px 160px 120px",
+          gap: 10,
+          alignItems: "center",
+          marginBottom: 12,
+        }}
+      >
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="개별번호/제품/주소/비고 검색 (예: KDA0001, K)"
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "1px solid #e5e5e5",
+            fontSize: 14,
+          }}
+        />
 
-        <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <div style={{ fontSize: 13, opacity: 0.85, minWidth: 42 }}>제품</div>
-            <select
-              value={skuFilter}
-              onChange={(e) => setSkuFilter(e.target.value)}
-              style={{
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid #e5e5e5",
-                fontSize: 14,
-                background: "white",
-              }}
-            >
-              <option value="ALL">전체</option>
-              {allSkus.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
+        <select
+          value={skuFilter}
+          onChange={(e) => setSkuFilter(e.target.value)}
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "1px solid #e5e5e5",
+            fontSize: 14,
+            background: "#fff",
+          }}
+        >
+          {skuOptions.map((s) => (
+            <option key={s} value={s}>
+              {s === "ALL" ? "제품 전체" : s}
+            </option>
+          ))}
+        </select>
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <div style={{ fontSize: 13, opacity: 0.85 }}>시작</div>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              style={{
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid #e5e5e5",
-                fontSize: 14,
-                background: "white",
-              }}
-            />
-          </div>
+        <select
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value)}
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "1px solid #e5e5e5",
+            fontSize: 14,
+            background: "#fff",
+          }}
+        >
+          {dateOptions.map((d) => (
+            <option key={d} value={d}>
+              {d === "ALL" ? "날짜 전체" : d}
+            </option>
+          ))}
+        </select>
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <div style={{ fontSize: 13, opacity: 0.85 }}>끝</div>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              style={{
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid #e5e5e5",
-                fontSize: 14,
-                background: "white",
-              }}
-            />
-          </div>
-
-          <button
-            onClick={runBackfill}
-            disabled={backfillLoading}
-            style={{
-              marginLeft: "auto",
-              padding: "10px 12px",
-              borderRadius: 10,
-              border: "1px solid #e5e5e5",
-              background: backfillLoading ? "#f3f3f3" : "white",
-              fontWeight: 900,
-              cursor: backfillLoading ? "not-allowed" : "pointer",
-            }}
-          >
-            {backfillLoading ? "주소 생성 중..." : "주소 없는 데이터 주소 생성"}
-          </button>
-        </div>
-
-        {backfillMsg && <div style={{ marginTop: 8, fontSize: 13, opacity: 0.85 }}>{backfillMsg}</div>}
-
-        <div style={{ marginTop: 10, fontSize: 13, opacity: 0.85 }}>
-          {qApplied.trim()
-            ? `검색결과 ${rows.length}건${exactCount ? ` (정확 일치 ${exactCount}건 상단)` : ""}`
-            : `총 ${initialRows.length}건`}
-        </div>
+        <button
+          onClick={() => fetchList()}
+          disabled={loading}
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "none",
+            fontWeight: 900,
+            cursor: loading ? "not-allowed" : "pointer",
+          }}
+        >
+          {loading ? "로딩..." : "새로고침"}
+        </button>
       </div>
 
+      {/* 오류 */}
+      {err && (
+        <div style={{ marginBottom: 10, padding: 10, borderRadius: 10, background: "#ffecec", color: "#b00020" }}>
+          {err}
+        </div>
+      )}
+
       {/* 리스트 */}
-      <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
-        {rows.map((r) => {
-          const lat = Number(r.lat);
-          const lng = Number(r.lng);
-          const acc = r.accuracy == null ? null : Number(r.accuracy);
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {filtered.map((r) => {
+          const item = (r.item_no || "").toUpperCase();
+          const isHighlight = exactMatchItem && item && item === exactMatchItem;
 
-          const isLowAcc = acc != null && acc >= 100;
-
-          const itemUpper = String(r.item_no || "").toUpperCase();
-          const isExactHighlight = qUpper && itemUpper && itemUpper === qUpper;
-
-          const qty = r.qty && Number(r.qty) > 0 ? Number(r.qty) : 1;
-
-          const idKey = String(r.id);
-          const hasPhoto = !!r.photo_url;
-          const isPhotoOpen = !!photoOpen[idKey];
+          const title = `${String(r.sku || "").toUpperCase()}${r.item_no ? ` / ${r.item_no}` : ""}`;
 
           return (
             <div
-              key={idKey}
+              key={r.id}
               style={{
-                border: isExactHighlight ? "2px solid #111" : "1px solid #e5e5e5",
-                borderRadius: 12,
+                border: "1px solid #e5e5e5",
+                borderRadius: 14,
                 padding: 12,
-                background: isExactHighlight ? "#fafafa" : "white",
+                background: isHighlight ? "#fff7cc" : "#fff",
               }}
             >
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ fontSize: 13, opacity: 0.8 }}>{toKstLabel(r.created_at)}</div>
-
-                {isExactHighlight && (
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 900,
-                      border: "1px solid #111",
-                      borderRadius: 999,
-                      padding: "4px 10px",
-                      background: "white",
-                    }}
-                  >
-                    정확 일치
-                  </span>
-                )}
-
-                {isLowAcc && (
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 900,
-                      borderRadius: 999,
-                      padding: "4px 10px",
-                      background: "#e53935",
-                      color: "white",
-                    }}
-                  >
-                    정확도 낮음 {Math.round(acc!)}m
-                  </span>
-                )}
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 1000, fontSize: 16 }}>
+                  {title}
+                  {accuracyBadge(r.accuracy)}
+                </div>
+                <div style={{ opacity: 0.75, fontSize: 13 }}>{fmtKST(r.created_at)}</div>
               </div>
 
-              <div style={{ marginTop: 6, fontSize: 16, fontWeight: 900 }}>
-                {String(r.sku || "").toUpperCase()}
-                {r.item_no ? <span style={{ fontWeight: 800 }}> / {r.item_no}</span> : null}
+              <div style={{ marginTop: 8, fontSize: 14, lineHeight: 1.55 }}>
+                <div>
+                  <b>주소:</b> {r.address || "주소 없음"}
+                </div>
+                <div>
+                  <b>수량:</b> {r.qty ?? 1}
+                  {"  "}
+                  <b style={{ marginLeft: 10 }}>상태:</b>{" "}
+                  {r.load_status === "O" ? "적재 O" : r.load_status === "X" ? "적재 X" : "알수없음"}
+                </div>
+                {r.note ? (
+                  <div>
+                    <b>비고:</b> {r.note}
+                  </div>
+                ) : null}
               </div>
 
-              <div style={{ marginTop: 6, fontSize: 13 }}>상태: {statusLabel(r.load_status)}</div>
-              <div style={{ marginTop: 6, fontSize: 13 }}>수량: {qty}</div>
-              <div style={{ marginTop: 6, fontSize: 13 }}>
-                정확도: {acc == null ? "-" : `${Math.round(acc)} m`}
-              </div>
-
-              <div style={{ marginTop: 6, fontSize: 13, opacity: 0.92 }}>
-                주소: {r.address ? r.address : "없음"}
-              </div>
-
-              <div style={{ marginTop: 6, fontSize: 13, opacity: 0.92, whiteSpace: "pre-wrap" }}>
-                비고: {r.note && r.note.trim() ? r.note : "-"}
-              </div>
-
-              {Number.isFinite(lat) && Number.isFinite(lng) && (
+              <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <a
-                  href={`https://www.google.com/maps?q=${lat},${lng}`}
+                  href={makeGoogleLink(r.lat, r.lng) || "#"}
                   target="_blank"
                   rel="noreferrer"
-                  style={{ display: "inline-block", marginTop: 8, fontSize: 14, fontWeight: 800 }}
+                  style={{
+                    pointerEvents: r.lat && r.lng ? "auto" : "none",
+                    opacity: r.lat && r.lng ? 1 : 0.45,
+                    fontWeight: 900,
+                  }}
                 >
                   구글지도 열기
                 </a>
-              )}
 
-              {/* 사진 버튼: ✅ 규칙 고정 */}
-              <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
                 <button
-                  disabled={!hasPhoto}
-                  onClick={() => {
-                    if (!hasPhoto) return;
-                    setPhotoOpen((prev) => ({ ...prev, [idKey]: !prev[idKey] }));
-                  }}
+                  onClick={() => r.photo_url && openPhoto(r.photo_url, title)}
+                  disabled={!r.photo_url}
                   style={{
-                    padding: "10px 12px",
+                    padding: "8px 10px",
                     borderRadius: 10,
                     border: "1px solid #e5e5e5",
-                    background: hasPhoto ? "white" : "#f3f3f3",
+                    background: "#fff",
                     fontWeight: 900,
-                    cursor: hasPhoto ? "pointer" : "not-allowed",
-                    opacity: hasPhoto ? 1 : 0.6,
+                    cursor: r.photo_url ? "pointer" : "not-allowed",
+                    opacity: r.photo_url ? 1 : 0.45,
                   }}
+                  title={r.photo_url ? "사진 보기" : "사진 없음"}
                 >
-                  {!hasPhoto ? "사진 없음" : isPhotoOpen ? "사진 접기" : "사진 펼치기"}
+                  {r.photo_url ? "사진 보기" : "사진 없음"}
                 </button>
               </div>
-
-              {hasPhoto && isPhotoOpen && (
-                <div style={{ marginTop: 10, border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>
-                  <img src={r.photo_url!} alt="photo" style={{ width: "100%", display: "block" }} />
-                </div>
-              )}
-
-              {/* 지도: ✅ 구글 embed로 통일 + key로 리렌더 */}
-              {Number.isFinite(lat) && Number.isFinite(lng) && (
-                <div style={{ marginTop: 10, border: "1px solid #e5e5e5", borderRadius: 12, overflow: "hidden" }}>
-                  <iframe
-                    key={`${lat},${lng}`}
-                    title={`map-${idKey}`}
-                    width="100%"
-                    height="260"
-                    style={{ border: 0, display: "block" }}
-                    src={makeGoogleEmbedSrc(lat, lng)}
-                    loading="lazy"
-                  />
-                </div>
-              )}
             </div>
           );
         })}
 
-        {rows.length === 0 && (
-          <div style={{ border: "1px solid #e5e5e5", borderRadius: 12, padding: 12 }}>
-            검색/필터 결과가 없습니다.
+        {!loading && filtered.length === 0 && (
+          <div style={{ padding: 20, borderRadius: 14, border: "1px dashed #ddd", textAlign: "center", opacity: 0.7 }}>
+            조회 결과가 없습니다.
           </div>
         )}
       </div>
+
+      {/* 사진 모달 */}
+      {photoModalUrl && (
+        <div
+          onClick={closePhoto}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 14,
+            zIndex: 9999,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(920px, 100%)",
+              background: "#fff",
+              borderRadius: 16,
+              overflow: "hidden",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                padding: "12px 14px",
+                borderBottom: "1px solid #eee",
+              }}
+            >
+              <div style={{ fontWeight: 1000 }}>{photoModalTitle}</div>
+              <button
+                onClick={closePhoto}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #e5e5e5",
+                  background: "#fff",
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                닫기
+              </button>
+            </div>
+
+            <div style={{ padding: 14 }}>
+              <img
+                src={photoModalUrl}
+                alt="photo"
+                style={{ width: "100%", height: "auto", display: "block", borderRadius: 12 }}
+              />
+              <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+                <a
+                  href={photoModalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ fontWeight: 900 }}
+                >
+                  원본 새창
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
